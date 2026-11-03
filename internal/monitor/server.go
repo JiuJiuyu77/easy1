@@ -11,24 +11,38 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	mathrand "math/rand"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"easy_proxies/internal/backup"
 	"easy_proxies/internal/config"
 	"easy_proxies/internal/geoip"
+	"easy_proxies/internal/importer"
 	"easy_proxies/internal/routing"
 )
 
-//go:embed assets/index.html
+//go:embed assets
 var embeddedFS embed.FS
+
+// assetContentTypes gates which embedded files are served and with what type.
+var assetContentTypes = map[string]string{
+	".html": "text/html; charset=utf-8",
+	".css":  "text/css; charset=utf-8",
+	".js":   "application/javascript; charset=utf-8",
+	".png":  "image/png",
+	".svg":  "image/svg+xml",
+}
 
 // Session represents a user session with expiration.
 type Session struct {
@@ -112,6 +126,8 @@ type Server struct {
 
 	subRefresher SubscriptionRefresher
 	nodeMgr      NodeManager
+	importSvc    ImportService
+	backupSvc    *backup.Service
 }
 
 // NewServer constructs a server; it can be nil when disabled.
@@ -141,6 +157,9 @@ func NewServer(cfg Config, mgr *Manager, logger *log.Logger) *Server {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
+	mux.HandleFunc("/assets/", s.handleAsset)
+	mux.HandleFunc("/logo.png", s.handleLogo)
+	mux.HandleFunc("/favicon.svg", s.handleFavicon)
 	mux.HandleFunc("/api/auth", s.handleAuth)
 	mux.HandleFunc("/api/settings", s.withAuth(s.handleSettings))
 	mux.HandleFunc("/api/proxy-sessions", s.withAuth(s.handleProxySessions))
@@ -152,13 +171,58 @@ func NewServer(cfg Config, mgr *Manager, logger *log.Logger) *Server {
 	mux.HandleFunc("/api/nodes/probe-all", s.withAuth(s.handleProbeAll))
 	mux.HandleFunc("/api/nodes/", s.withAuth(s.handleNodeAction))
 	mux.HandleFunc("/api/debug", s.withAuth(s.handleDebug))
+	mux.HandleFunc("/api/diagnostics", s.withAuth(s.handleDiagnostics))
 	mux.HandleFunc("/api/export", s.withAuth(s.handleExport))
+	mux.HandleFunc("/api/data-export/nodes", s.withAuth(s.handleDataExportNodes))
+	mux.HandleFunc("/api/data-export/subscriptions", s.withAuth(s.handleDataExportSubscriptions))
+	mux.HandleFunc("/api/data-export/tags", s.withAuth(s.handleDataExportTags))
+	mux.HandleFunc("/api/backup/local", s.withAuth(s.handleLocalBackup))
+	mux.HandleFunc("/api/backup/local/restore", s.withAuth(s.handleLocalRestore))
+	mux.HandleFunc("/api/backup/webdav/settings", s.withAuth(s.handleWebDAVSettings))
+	mux.HandleFunc("/api/backup/webdav/test", s.withAuth(s.handleWebDAVTest))
+	mux.HandleFunc("/api/backup/webdav/files", s.withAuth(s.handleWebDAVFiles))
+	mux.HandleFunc("/api/backup/webdav/create", s.withAuth(s.handleWebDAVCreate))
+	mux.HandleFunc("/api/backup/webdav/", s.withAuth(s.handleWebDAVFileAction))
 	mux.HandleFunc("/api/subscription/status", s.withAuth(s.handleSubscriptionStatus))
 	mux.HandleFunc("/api/subscription/refresh", s.withAuth(s.handleSubscriptionRefresh))
 	mux.HandleFunc("/api/subscription/config", s.withAuth(s.handleSubscriptionConfig))
+	mux.HandleFunc("/api/subscription/delete", s.withAuth(s.handleSubscriptionDelete))
 	mux.HandleFunc("/api/reload", s.withAuth(s.handleReload))
 	mux.HandleFunc("/api/traffic", s.withAuth(s.handleTraffic))
 	mux.HandleFunc("/api/logs", s.withAuth(s.handleLogs))
+	mux.HandleFunc("/api/logs/clear", s.withAuth(s.handleLogsClear))
+	mux.HandleFunc("/api/import/parse", s.withAuth(s.handleImportParse))
+	mux.HandleFunc("/api/import/summary", s.withAuth(s.handleImportSummary))
+	mux.HandleFunc("/api/import/sources", s.withAuth(s.handleImportSources))
+	mux.HandleFunc("/api/import/", s.withAuth(s.handleImportAction))
+	mux.HandleFunc("/api/chain-profiles", s.withAuth(s.handleChainProfiles))
+	mux.HandleFunc("/api/chain-profiles/test", s.withAuth(s.handleChainProfileTest))
+	mux.HandleFunc("/api/connectivity/scopes", s.withAuth(s.handleConnectivityScopes))
+	mux.HandleFunc("/api/connectivity/jobs/start", s.withAuth(s.handleConnectivityStart))
+	mux.HandleFunc("/api/connectivity/jobs/status", s.withAuth(s.handleConnectivityStatus))
+	mux.HandleFunc("/api/connectivity/jobs/cancel", s.withAuth(s.handleConnectivityCancel))
+	mux.HandleFunc("/api/connectivity/results", s.withAuth(s.handleConnectivityResults))
+	mux.HandleFunc("/api/connectivity/history", s.withAuth(s.handleConnectivityHistory))
+	mux.HandleFunc("/api/connectivity/ports/preview", s.withAuth(s.handleConnectivityPortPreview))
+	mux.HandleFunc("/api/connectivity/ports/apply", s.withAuth(s.handleConnectivityPortApply))
+	mux.HandleFunc("/api/job-events", s.withAuth(s.handleJobEvents))
+	mux.HandleFunc("/api/ui/summary", s.withAuth(s.handleUISummary))
+	mux.HandleFunc("/api/ui/nodes", s.withAuth(s.handleUINodes))
+	mux.HandleFunc("/api/ui/ports", s.withAuth(s.handleUIPorts))
+	mux.HandleFunc("/api/ui/pool-order", s.withAuth(s.handleUIPoolOrder))
+	mux.HandleFunc("/api/nodes/all", s.withAuth(s.handleManagedNodesAll))
+	mux.HandleFunc("/api/nodes/pool", s.withAuth(s.handleManagedNodesPool))
+	mux.HandleFunc("/api/nodes/failed", s.withAuth(s.handleManagedNodesFailed))
+	mux.HandleFunc("/api/nodes/order", s.withAuth(s.handleManagedNodesOrder))
+	mux.HandleFunc("/api/managed-nodes/", s.withAuth(s.handleManagedNodeAction))
+	mux.HandleFunc("/api/ports/status", s.withAuth(s.handlePortsStatus))
+	if cfg.PprofEnabled && isLoopbackListen(cfg.Listen) {
+		mux.HandleFunc("/debug/pprof/", s.withAuth(pprof.Index))
+		mux.HandleFunc("/debug/pprof/cmdline", s.withAuth(pprof.Cmdline))
+		mux.HandleFunc("/debug/pprof/profile", s.withAuth(pprof.Profile))
+		mux.HandleFunc("/debug/pprof/symbol", s.withAuth(pprof.Symbol))
+		mux.HandleFunc("/debug/pprof/trace", s.withAuth(pprof.Trace))
+	}
 	s.srv = &http.Server{
 		Addr: cfg.Listen, Handler: mux,
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second,
@@ -175,6 +239,55 @@ func (s *Server) SetSubscriptionRefresher(sr SubscriptionRefresher) {
 		s.subRefresher = sr
 		s.cfgMu.Unlock()
 	}
+}
+
+// SetImportService wires the import/pool/connectivity backend behind the UI.
+func (s *Server) SetImportService(svc ImportService) {
+	if s != nil {
+		s.cfgMu.Lock()
+		s.importSvc = svc
+		s.cfgMu.Unlock()
+	}
+}
+
+// SetBackupService wires the local/WebDAV backup endpoints.
+func (s *Server) SetBackupService(svc *backup.Service) {
+	if s != nil {
+		s.cfgMu.Lock()
+		s.backupSvc = svc
+		s.cfgMu.Unlock()
+	}
+}
+
+func (s *Server) importService() ImportService {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.importSvc
+}
+
+func (s *Server) backupService() *backup.Service {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.backupSvc
+}
+
+// isLoopbackListen reports whether the management listener only accepts local
+// connections, which is the precondition for exposing pprof.
+func isLoopbackListen(listen string) bool {
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		host = listen
+	}
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // SetNodeManager enables config-node CRUD endpoints.
@@ -321,6 +434,45 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(data)
+}
+
+func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/assets/")
+	contentType, ok := assetContentTypes[path.Ext(name)]
+	if !ok || !fs.ValidPath(name) {
+		http.NotFound(w, r)
+		return
+	}
+	data, err := embeddedFS.ReadFile("assets/" + name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(data)
+}
+
+func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
+	data, err := embeddedFS.ReadFile("assets/logo.png")
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(data)
+}
+
+func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
+	data, err := embeddedFS.ReadFile("assets/favicon.svg")
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = w.Write(data)
 }
 
@@ -1366,11 +1518,44 @@ func (s *Server) handleSubscriptionConfig(w http.ResponseWriter, r *http.Request
 			enabled = s.cfgSrc.SubscriptionRefresh.Enabled
 			interval = s.cfgSrc.SubscriptionRefresh.Interval.String()
 		}
+		test204 := true
+		var siteTargets []string
+		if s.cfgSrc != nil {
+			test204 = s.cfgSrc.SubscriptionRefresh.Test204Enabled()
+			siteTargets = append([]string(nil), s.cfgSrc.SubscriptionRefresh.SiteTargets...)
+		}
 		s.cfgMu.RUnlock()
+		// Display name per URL: the TagPrefix of a node imported from that URL,
+		// otherwise the host. The import page uses it to label subscriptions.
+		names := make(map[string]string, len(urls))
+		var imported []importer.ManagedNode
+		if svc := s.importService(); svc != nil {
+			imported, _ = svc.ListAll()
+		}
+		for _, u := range urls {
+			name := ""
+			for _, n := range imported {
+				if n.ImportSource == u && n.TagPrefix != "" {
+					name = n.TagPrefix
+					break
+				}
+			}
+			if name == "" {
+				if parsed, err := url.Parse(u); err == nil && parsed.Host != "" {
+					name = parsed.Host
+				} else {
+					name = u
+				}
+			}
+			names[u] = name
+		}
 		writeJSON(w, map[string]any{
 			"subscriptions": urls,
+			"names":         names,
 			"enabled":       enabled,
 			"interval":      interval,
+			"test_204":      test204,
+			"site_targets":  siteTargets,
 		})
 
 	case http.MethodPut:
@@ -1378,6 +1563,9 @@ func (s *Server) handleSubscriptionConfig(w http.ResponseWriter, r *http.Request
 			Subscriptions []string `json:"subscriptions"`
 			Enabled       bool     `json:"enabled"`
 			Interval      string   `json:"interval"` // e.g. "1h", "30m"
+			Refresh       *bool    `json:"refresh,omitempty"`
+			Test204       *bool    `json:"test_204,omitempty"`
+			SiteTargets   []string `json:"site_targets,omitempty"`
 		}
 		if err := decodeManagementJSON(w, r, 1<<20, &req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -1430,6 +1618,26 @@ func (s *Server) handleSubscriptionConfig(w http.ResponseWriter, r *http.Request
 		candidate.SubscriptionRefresh = s.cfgSrc.SubscriptionRefresh
 		candidate.SubscriptionRefresh.Enabled = req.Enabled
 		candidate.SubscriptionRefresh.Interval = interval
+		// Site/204 verification policy is owned by the subscription settings:
+		// an omitted field keeps the current value.
+		effective204 := candidate.SubscriptionRefresh.Test204Enabled()
+		if req.Test204 != nil {
+			effective204 = *req.Test204
+		}
+		effectiveTargets := candidate.SubscriptionRefresh.SiteTargets
+		if req.SiteTargets != nil {
+			effectiveTargets = req.SiteTargets
+		}
+		policy, policyErr := importer.NormalizeVerificationPolicy(&effective204, effectiveTargets)
+		if policyErr != nil {
+			s.cfgMu.Unlock()
+			unlock()
+			writeStatusJSON(w, http.StatusBadRequest, map[string]any{"error": policyErr.Error()})
+			return
+		}
+		policyTest204 := policy.Test204
+		candidate.SubscriptionRefresh.Test204 = &policyTest204
+		candidate.SubscriptionRefresh.SiteTargets = append([]string(nil), policy.SiteTargets...)
 		if err := candidate.SaveSubscriptionSettings(); err != nil {
 			s.cfgMu.Unlock()
 			unlock()
@@ -1441,8 +1649,12 @@ func (s *Server) handleSubscriptionConfig(w http.ResponseWriter, r *http.Request
 		s.cfgMu.Unlock()
 		unlock() // Refresh may invoke reload, which requires the same manager lock.
 
-		// Hot-reload subscription manager and wait for refresh to complete
-		if refresher != nil {
+		refreshNow := req.Refresh == nil || *req.Refresh
+		// Hot-reload subscription manager. Import-page saves pass refresh=false
+		// because importing runs its own batch job, so do not block on a fetch.
+		if refresher != nil && !refreshNow {
+			refresher.UpdateConfig(cleanURLs, req.Enabled, interval)
+		} else if refresher != nil {
 			var refreshErr error
 			if contextual, ok := contextualRefresher(refresher); ok {
 				refreshErr = contextual.UpdateConfigAndRefreshContext(r.Context(), cleanURLs, req.Enabled, interval)
@@ -1472,6 +1684,9 @@ func (s *Server) handleSubscriptionConfig(w http.ResponseWriter, r *http.Request
 			"enabled":       req.Enabled,
 			"interval":      interval.String(),
 			"node_count":    status.NodeCount,
+			"refresh":       refreshNow,
+			"test_204":      policy.Test204,
+			"site_targets":  policy.SiteTargets,
 		})
 
 	default:
@@ -1481,20 +1696,22 @@ func (s *Server) handleSubscriptionConfig(w http.ResponseWriter, r *http.Request
 
 // nodePayload is the JSON request body for node CRUD operations.
 type nodePayload struct {
-	Name     string `json:"name"`
-	URI      string `json:"uri"`
-	Port     uint16 `json:"port"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Name           string `json:"name"`
+	URI            string `json:"uri"`
+	ChainProfileID string `json:"chain_profile_id"`
+	Port           uint16 `json:"port"`
+	Username       string `json:"username"`
+	Password       string `json:"password"`
 }
 
 func (p nodePayload) toConfig() config.NodeConfig {
 	return config.NodeConfig{
-		Name:     p.Name,
-		URI:      p.URI,
-		Port:     p.Port,
-		Username: p.Username,
-		Password: p.Password,
+		Name:           p.Name,
+		URI:            p.URI,
+		ChainProfileID: p.ChainProfileID,
+		Port:           p.Port,
+		Username:       p.Username,
+		Password:       p.Password,
 	}
 }
 

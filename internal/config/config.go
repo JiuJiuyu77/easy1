@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"easy_proxies/internal/proxychain"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,6 +35,8 @@ type Config struct {
 	SubscriptionRefresh SubscriptionRefreshConfig `yaml:"subscription_refresh"`
 	GeoIP               GeoIPConfig               `yaml:"geoip"`
 	Log                 LogConfig                 `yaml:"log"`
+	WebDAV              WebDAVConfig              `yaml:"webdav"`
+	ChainProfiles       []proxychain.Profile      `yaml:"chain_profiles,omitempty" json:"chain_profiles,omitempty"`
 	Nodes               []NodeConfig              `yaml:"nodes"`
 	NodesFile           string                    `yaml:"nodes_file"`    // 节点文件路径，每行一个 URI
 	Subscriptions       []string                  `yaml:"subscriptions"` // 订阅链接列表
@@ -42,6 +46,16 @@ type Config struct {
 
 	filePath string `yaml:"-"` // 配置文件路径，用于保存
 }
+
+// WebDAVConfig holds the remote backup target.
+type WebDAVConfig struct {
+	Address  string `yaml:"address" json:"address"`
+	Username string `yaml:"username" json:"username"`
+	Password string `yaml:"password" json:"password"`
+	Folder   string `yaml:"folder" json:"folder"`
+}
+
+const DefaultWebDAVFolder = "/easy_proxies"
 
 // LogConfig controls log output and rotation.
 type LogConfig struct {
@@ -176,6 +190,7 @@ type ManagementConfig struct {
 	ProbeTarget      string `yaml:"probe_target"`
 	Password         string `yaml:"password"`          // WebUI 访问密码，为空则不需要密码
 	ProbeConcurrency int    `yaml:"probe_concurrency"` // 并发探测线程数（8-1024，默认 32），大规模节点可调高以加快探测
+	PprofEnabled     bool   `yaml:"pprof_enabled,omitempty"`
 }
 
 // SubscriptionRefreshConfig controls subscription auto-refresh and reload settings.
@@ -187,6 +202,14 @@ type SubscriptionRefreshConfig struct {
 	DrainTimeout       time.Duration `yaml:"drain_timeout"`        // 旧实例排空超时时间
 	MinAvailableNodes  int           `yaml:"min_available_nodes"`  // 最少可用节点数，低于此值不切换
 	FetchConcurrency   int           `yaml:"fetch_concurrency"`    // 订阅抓取并发数，默认 16，最大 32
+	Test204            *bool         `yaml:"test_204,omitempty" json:"test_204,omitempty"`
+	SiteTargets        []string      `yaml:"site_targets,omitempty" json:"site_targets,omitempty"`
+}
+
+// Test204Enabled reports whether the generate_204 reachability probe is used;
+// nil means "enabled" (the historical default).
+func (c SubscriptionRefreshConfig) Test204Enabled() bool {
+	return c.Test204 == nil || *c.Test204
 }
 
 // NodeSource indicates where a node configuration originated from.
@@ -227,12 +250,13 @@ type SubscriptionFetchOptions struct {
 
 // NodeConfig describes a single upstream proxy endpoint expressed as URI.
 type NodeConfig struct {
-	Name     string     `yaml:"name" json:"name"`
-	URI      string     `yaml:"uri" json:"uri"`
-	Port     uint16     `yaml:"port,omitempty" json:"port,omitempty"`
-	Username string     `yaml:"username,omitempty" json:"username,omitempty"`
-	Password string     `yaml:"password,omitempty" json:"password,omitempty"`
-	Source   NodeSource `yaml:"-" json:"source,omitempty"` // Runtime only, not persisted
+	Name           string     `yaml:"name" json:"name"`
+	URI            string     `yaml:"uri" json:"uri"`
+	ChainProfileID string     `yaml:"chain_profile_id,omitempty" json:"chain_profile_id,omitempty"`
+	Port           uint16     `yaml:"port,omitempty" json:"port,omitempty"`
+	Username       string     `yaml:"username,omitempty" json:"username,omitempty"`
+	Password       string     `yaml:"password,omitempty" json:"password,omitempty"`
+	Source         NodeSource `yaml:"-" json:"source,omitempty"` // Runtime only, not persisted
 }
 
 // NodeKey returns a stable identifier for the node, used to preserve port
@@ -244,7 +268,14 @@ type NodeConfig struct {
 // scheme, credentials, host, port and parameter set are unchanged, a node
 // keeps the same key — and therefore the same proxy port.
 func (n *NodeConfig) NodeKey() string {
-	return stableNodeKey(n.URI)
+	key := stableNodeKey(n.URI)
+	// A node routed through a chain (deprecated "front proxy") has its own
+	// route identity: the same upstream URI behind two different chains is two
+	// distinct pool entries with two distinct ports.
+	if id := strings.TrimSpace(n.ChainProfileID); id != "" {
+		return key + "\x00" + id
+	}
+	return key
 }
 
 // stableNodeKey derives a port-stable identity from a proxy URI by stripping the
@@ -378,6 +409,14 @@ func ExtractNodeName(uri string) string {
 }
 
 func (c *Config) normalize() error {
+	profiles, err := proxychain.NormalizeProfiles(c.ChainProfiles)
+	if err != nil {
+		return err
+	}
+	c.ChainProfiles = profiles
+	if strings.TrimSpace(c.WebDAV.Folder) == "" {
+		c.WebDAV.Folder = DefaultWebDAVFolder
+	}
 	if c.Mode == "" {
 		c.Mode = "pool"
 	}
@@ -510,8 +549,10 @@ func (c *Config) normalize() error {
 		c.Nodes = append(c.Nodes, subNodes...)
 	}
 
+	// An empty node set is allowed: a fresh install starts with the management
+	// UI only, and nodes arrive through the import page (see the pool store).
 	if len(c.Nodes) == 0 {
-		return errors.New("config.nodes cannot be empty (configure nodes in config or use nodes_file)")
+		return nil
 	}
 	// portCursor is an int (not uint16) so the >65535 exhaustion guard fires
 	// instead of wrapping to 0 and assigning unbindable low ports.
@@ -523,6 +564,17 @@ func (c *Config) normalize() error {
 
 		if c.Nodes[idx].URI == "" {
 			return fmt.Errorf("node %d is missing uri", idx)
+		}
+
+		if id := strings.TrimSpace(c.Nodes[idx].ChainProfileID); id != "" {
+			profile, ok := proxychain.Find(c.ChainProfiles, id)
+			if !ok {
+				return fmt.Errorf("node %d references unknown chain profile %q", idx, id)
+			}
+			if !profile.Enabled {
+				return fmt.Errorf("node %d references disabled chain profile %q", idx, id)
+			}
+			c.Nodes[idx].ChainProfileID = id
 		}
 
 		// Auto-extract name from URI if not provided
@@ -757,6 +809,14 @@ func (c *Config) applyPersistedPorts(explicitPorts []bool) error {
 // NormalizeWithPortMap applies defaults and validation, preserving port assignments
 // for nodes that exist in the provided port map.
 func (c *Config) NormalizeWithPortMap(portMap map[string]uint16) error {
+	profiles, err := proxychain.NormalizeProfiles(c.ChainProfiles)
+	if err != nil {
+		return err
+	}
+	c.ChainProfiles = profiles
+	if strings.TrimSpace(c.WebDAV.Folder) == "" {
+		c.WebDAV.Folder = DefaultWebDAVFolder
+	}
 	if c.Mode == "" {
 		c.Mode = "pool"
 	}
@@ -828,7 +888,7 @@ func (c *Config) NormalizeWithPortMap(portMap map[string]uint16) error {
 	c.SubscriptionRefresh.FetchConcurrency = normalizeSubscriptionFetchConcurrency(c.SubscriptionRefresh.FetchConcurrency)
 
 	if len(c.Nodes) == 0 {
-		return errors.New("config.nodes cannot be empty")
+		return nil
 	}
 
 	// Build set of ports already assigned from portMap
@@ -843,6 +903,17 @@ func (c *Config) NormalizeWithPortMap(portMap map[string]uint16) error {
 		c.Nodes[idx].URI = strings.TrimSpace(c.Nodes[idx].URI)
 		if c.Nodes[idx].URI == "" {
 			return fmt.Errorf("node %d is missing uri", idx)
+		}
+
+		if id := strings.TrimSpace(c.Nodes[idx].ChainProfileID); id != "" {
+			profile, ok := proxychain.Find(c.ChainProfiles, id)
+			if !ok {
+				return fmt.Errorf("node %d references unknown chain profile %q", idx, id)
+			}
+			if !profile.Enabled {
+				return fmt.Errorf("node %d references disabled chain profile %q", idx, id)
+			}
+			c.Nodes[idx].ChainProfileID = id
 		}
 
 		// Auto-extract name from URI if not provided
@@ -1970,11 +2041,12 @@ func (c *Config) SaveNodes() error {
 	for _, node := range c.Nodes {
 		// Create a clean copy without runtime fields for saving
 		cleanNode := NodeConfig{
-			Name:     node.Name,
-			URI:      node.URI,
-			Port:     node.Port,
-			Username: node.Username,
-			Password: node.Password,
+			Name:           node.Name,
+			URI:            node.URI,
+			ChainProfileID: node.ChainProfileID,
+			Port:           node.Port,
+			Username:       node.Username,
+			Password:       node.Password,
 		}
 		switch node.Source {
 		case NodeSourceInline:
@@ -2078,6 +2150,8 @@ func (c *Config) saveSettings(includeSubscriptions bool) error {
 		saveCfg.Pool = c.Pool
 		saveCfg.Sticky = c.Sticky
 		saveCfg.Management = c.Management
+		saveCfg.WebDAV = c.WebDAV
+		saveCfg.ChainProfiles = append([]proxychain.Profile(nil), c.ChainProfiles...)
 	})
 }
 

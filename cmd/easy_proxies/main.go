@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -18,10 +19,41 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
+// Covers the launcher's graceful shutdown window for a previous instance.
+const instanceLockWait = 40 * time.Second
+
 func main() {
 	var configPath string
+	var shutdownOnStdinClose bool
 	flag.StringVar(&configPath, "config", "config.yaml", "path to config file")
+	flag.BoolVar(&shutdownOnStdinClose, "shutdown-on-stdin-close", false, "exit when the owning launcher's stdin pipe closes")
 	flag.Parse()
+
+	ctxBase, cancelBase := context.WithCancel(context.Background())
+	defer cancelBase()
+
+	if shutdownOnStdinClose {
+		go func() {
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			cancelBase()
+			// The owner must not leave listeners behind even if a dependency
+			// fails to honor cancellation during startup or shutdown.
+			time.Sleep(35 * time.Second)
+			os.Exit(1)
+		}()
+	}
+
+	// One config file must map to one runtime: a second instance would fight
+	// over the same ports and node_ports.json.
+	releaseLock, err := config.AcquireInstanceLock(configPath, 0)
+	if errors.Is(err, config.ErrInstanceRunning) {
+		log.Printf("⏳ Another instance is using %s; waiting up to %s for it to exit...", configPath, instanceLockWait)
+		releaseLock, err = config.AcquireInstanceLock(configPath, instanceLockWait)
+	}
+	if err != nil {
+		log.Fatalf("instance lock: %v", err)
+	}
+	defer releaseLock()
 
 	var cfg *config.Config
 	for attempt := 1; attempt <= 3; attempt++ {
@@ -41,10 +73,7 @@ func main() {
 	// Setup logging based on config
 	setupLogging(cfg)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if err := app.Run(ctx, cfg); err != nil {
+	if err := app.Run(ctxBase, cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "proxy pool exited with error: %v\n", err)
 		os.Exit(1)
 	}

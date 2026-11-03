@@ -114,6 +114,8 @@ management:
   listen: 0.0.0.0:9091                               # 监听地址
   probe_target: http://cp.cloudflare.com/generate_204  # 健康检查目标
   password: ""                                       # WebUI 访问密码，为空则不需要密码
+  probe_concurrency: 32                              # 批量/周期探测并发数
+  pprof_enabled: false                               # 仅在监听回环地址时生效，供性能排查用
 
 # ───────────────────────────────────────────────────────────────
 # DNS 配置（用于节点域名解析，尤其是 VMess）
@@ -150,7 +152,27 @@ geoip:
 #   fetch_concurrency: 16       # 订阅抓取并发数（默认 16，最大 32）
 #   health_check_timeout: 60s   # 新节点健康检查超时
 #   drain_timeout: 30s          # 旧实例排空超时时间
-#   min_available_nodes: 1      # 最少可用节点数，低于此值不切换
+#   min_available_# ───────────────────────────────────────────────────────────────
+# 前置代理（链式路由）
+# 每个 profile 是一串跳板 URI，最外层作为节点出站的 detour；节点用
+# chain_profile_id 引用。最多 8 跳，修改后需重新检测再应用。
+# ───────────────────────────────────────────────────────────────
+chain_profiles: []
+# chain_profiles:
+#   - id: jp-relay
+#     name: 日本中转
+#     enabled: true
+#     hops:
+#       - uri: socks5://user:pass@1.2.3.4:1080
+
+# 备份目标（WebDAV），留空则只用本地备份
+webdav:
+  address: ""
+  username: ""
+  password: ""
+  folder: /easy_proxies
+
+nodes: 1      # 最少可用节点数，低于此值不切换
 
 # ═══════════════════════════════════════════════════════════════
 # 节点配置方式（三选一或混合使用）

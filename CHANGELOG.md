@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **前置代理（链式路由）**: `chain_profiles` in `config.yaml` describes up to 8 hops; a node references one with `chain_profile_id` and sing-box dials it through the generated detour chain. Exposed in the WebUI (导入节点/设置 页) with `/api/chain-profiles` and `/api/chain-profiles/test`, and every route change re-tests before it is applied. Chained nodes keep a separate port/identity per chain (`NodeKey` includes the profile id), and hop URIs may not point back at this instance's own listener ports.
+- **New multi-page WebUI** (dashboard, import, pool, candidates, failed, bulk tools, site connectivity, ports, logs, settings) served from `internal/monitor/assets` and backed by the new endpoints `/api/ui/*`, `/api/import/*`, `/api/connectivity/*`, `/api/ports/status`, `/api/managed-nodes/*`, `/api/nodes/{all,pool,failed,order}`, `/api/job-events` (SSE).
+- **Managed node store**: `managed_nodes.json` keeps candidates, the pool and failed nodes with per-route ports; the pool is the single source of truth for sing-box listeners at startup (`internal/importer`, sqlite-backed job/pool state).
+- **Backup/restore**: local zip export and WebDAV targets (`/api/backup/*`, `webdav:` config block) with schema versioning and checksums.
+- Keep the session-routing feature of this branch: the new UI gains a **会话路由** page driving `/api/proxy-sessions` (random id, HTTP/SOCKS5 link + curl generation, per-session and global reset).
+
+### Changed
+- `config.nodes` may now be empty: a fresh install starts with the management UI only and imports its first nodes there.
+- The subscription worker delegates each tick to the importer when managed import sources exist, and keeps the classic "load every subscription node" path otherwise; `subscription_refresh.test_204` / `site_targets` control the verification policy.
+- `pool.mode: rotate` is accepted as a legacy alias of `sequential`, and `management.pprof_enabled` exposes pprof on loopback listeners only.
+- Startup acquires a per-config instance lock and supports `--shutdown-on-stdin-close` for launcher-managed restarts.
+
 ## [3.3.0] - 2026-10-25
 
 ### Added
