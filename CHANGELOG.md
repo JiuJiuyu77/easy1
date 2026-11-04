@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **手机端适配**：新增 `mobile.css`，导航在窄屏压成一行横向滚动、卡片单列、表格横向滚动、表单与按钮全宽，设置区不再被挤成竖排。
 
 ### Fixed
+- **端口占用不再拖垮启动**：`RebuildPortAssignments` 失败或 pool 里存在"还没拿到运行时端口"的节点时，之前会直接退出（容器反复重启，日志 `runtime port missing for pool node`）；现在降级为告警并继续启动，同时新增节点时的端口分配会跳过被其它进程占用的端口。
 - **端口冲突**：节点端口分配器（新增节点、重建端口、排序）以前只避开其他节点占用的端口，可能把代理入口、管理 API、粘性入口、Clash 流量端口或 GeoIP 端口分给节点，绑定失败甚至顶掉 WebUI。现在两个分配路径都使用配置层的保留端口集合，并补了回归测试。
 - **`config.example.yaml` 顶层 `nodes` 键重复**：插入前置代理段落时误把 `#   min_available_nodes: 1` 截断，并遗留了一个顶层 `nodes: 1`，直接复制示例配置会得到重复键。
 - **前置代理无法解码 Base64**：粘贴的 vmess/ss URI 现在会先做归一化——还原 `%2B`/`%2F`/`%3D` 等 URL 编码、去掉换行与零宽字符、剥离客户端追加的 `?remarks=…` 后缀；归一化在校验、保存、拨号三处统一生效，配置里落盘的也是解码后的干净 URI。

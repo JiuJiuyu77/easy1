@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -112,10 +113,13 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			cfg.Nodes[i].Port = 0
 		}
 		if err := boxMgr.RebuildPortAssignments(); err != nil {
-			return fmt.Errorf("rebuild port assignments: %w", err)
+			// A port conflict or an exhausted range must not keep the whole
+			// instance down: keep the configured ports and let the runtime
+			// reassign on bind failure.
+			fmt.Printf("⚠️  rebuild port assignments failed: %v (keeping existing ports)\n", err)
 		}
 		if err := syncPoolRuntimePorts(nodeStore, poolNodes, cfg.Nodes); err != nil {
-			return fmt.Errorf("sync rebuilt port assignments: %w", err)
+			fmt.Printf("⚠️  sync pool port assignments: %v (continuing)\n", err)
 		}
 	}
 
@@ -236,7 +240,10 @@ func syncPoolRuntimePorts(store *importer.Store, poolNodes []importer.ManagedNod
 	for _, node := range poolNodes {
 		configured, ok := byRoute[node.URI+"\x00"+node.ChainProfileID]
 		if !ok || configured.Port == 0 {
-			return errors.New("runtime port missing for pool node")
+			// The pool entry is not part of this runtime (yet) or still has no
+			// port. Neither is fatal: skip it instead of refusing to start.
+			log.Printf("pool node %q has no runtime port yet; skipping port sync", node.Name)
+			continue
 		}
 		if node.Port == configured.Port && node.Name == configured.Name {
 			continue

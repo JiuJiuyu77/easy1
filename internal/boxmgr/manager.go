@@ -1386,18 +1386,31 @@ func (m *Manager) nextAvailablePortLocked() uint16 {
 	}
 	// Never hand out a port this process listens on (proxy entry, sticky entry,
 	// management API, Clash traffic controller, GeoIP); binding it would fail.
-	for reserved := range m.cfg.ReservedListenerPorts() {
-		used[reserved] = struct{}{}
+	reserved := m.cfg.ReservedListenerPorts()
+	address := m.cfg.MultiPort.Address
+	if address == "" {
+		address = "0.0.0.0"
 	}
 	port := base
 	for i := 0; i < 1<<16; i++ {
-		if _, ok := used[port]; !ok && port != 0 {
-			return port
-		}
-		port++
 		if port == 0 {
 			port = 1
 		}
+		if _, taken := used[port]; taken {
+			port++
+			continue
+		}
+		if reserved[port] {
+			port++
+			continue
+		}
+		// Skip ports another process already holds, so a new node does not get
+		// a port that cannot be bound.
+		if !config.IsPortAvailable(address, port) {
+			port++
+			continue
+		}
+		return port
 	}
 	return base
 }
