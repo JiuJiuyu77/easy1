@@ -148,7 +148,8 @@ function renderSettings(){
   const webdavFiles=S.webdavFiles||[];
   const webdavLoading=!!S.webdavLoading;
   const interval=durationParts(sub.interval||'24h');
-  const probeTarget=allowedProbeTarget(s.probe_target);
+  const probeTargets=(management.probe_targets&&management.probe_targets.length?management.probe_targets:[s.probe_target||'https://www.gstatic.com/generate_204']);
+  const probePolicy=management.probe_policy==='all'?'all':'any';
   const blacklistSeconds=durationSeconds(pool.blacklist_duration,600);
   const rotationSeconds=durationSeconds(pool.rotation_interval,120);
   const sticky=s.sticky||{};
@@ -158,6 +159,7 @@ function renderSettings(){
   const probeConcurrency=Number(management.probe_concurrency)||32;
   const hasMgmtPassword=!!management.has_password;
   const geo=s.geoip||{};
+  const dns=s.dns||{};
   const logCfg=s.log||{};
   const sessionEnabled=sticky.session_enabled!==false;
   const sessionTTLHours=Math.max(1,Math.round(durationSeconds(sticky.session_ttl,86400)/3600));
@@ -188,7 +190,16 @@ function renderSettings(){
         <div class="settings-section-body">
           <div class="settings-form">
             <div class="field"><label>运行模式</label><select id="setMode"><option value="pool">pool</option><option value="multi-port">multi-port</option><option value="hybrid">hybrid</option></select></div>
-            <div class="field"><label>探测目标</label><select id="setProbe"><option value="https://www.gstatic.com/generate_204">gstatic generate_204</option><option value="https://cp.cloudflare.com/generate_204">cloudflare generate_204</option></select></div>
+            <div class="field wide"><label>探测目标（每行一个，可填任意 http(s) URL 或 host:port）</label>
+              <textarea id="setProbeTargets" rows="3" placeholder="https://www.gstatic.com/generate_204&#10;https://www.github.com/">${esc(probeTargets.join('\n'))}</textarea>
+              <div class="probe-presets">
+                <button class="btn small ghost" type="button" onclick="addProbeTarget('https://www.gstatic.com/generate_204')">+ gstatic 204</button>
+                <button class="btn small ghost" type="button" onclick="addProbeTarget('https://cp.cloudflare.com/generate_204')">+ cloudflare 204</button>
+                <button class="btn small ghost" type="button" onclick="addProbeTarget('https://www.github.com/')">+ GitHub</button>
+                <button class="btn small ghost" type="button" onclick="addProbeTarget('www.apple.com:80')">+ Apple:80</button>
+              </div>
+            </div>
+            <div class="field"><label>判定方式</label><select id="setProbePolicy"><option value="any">任一通过即算可用</option><option value="all">全部通过才算可用</option></select></div>
             <div class="field"><label>外部 IP</label><input id="setExternal" value="${esc(s.external_ip||'')}" placeholder="留空则使用当前访问地址"></div>
             <div class="field"><label>管理监听</label><input id="setMgmtListen" value="${esc(management.listen||'')}"></div>
             <div class="field"><label>探测并发</label><input id="setProbeConcurrency" type="number" min="1" max="1024" value="${esc(probeConcurrency)}"></div>
@@ -266,6 +277,28 @@ function renderSettings(){
             <div class="field"><label>监听端口</label><input id="setGeoIPPort" type="number" value="${esc(geo.port||0)}"></div>
           </div>
           <label class="toggle-row"><input id="setGeoIPAuto" type="checkbox" ${geo.auto_update_enabled?'checked':''} style="width:auto"><div><strong>自动更新数据库</strong></div></label>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-head"><h2>DNS 解析</h2><span class="pill ${dns.server?'green':'amber'}">${dns.server?'已配置':'系统解析'}</span></div>
+        <div class="settings-section-body">
+          <p class="muted">节点只给域名（VMess、订阅里的域名节点）时用这里的解析器；留空则用系统 DNS。</p>
+          <div class="settings-form">
+            <div class="field"><label>DNS 服务器</label><input id="setDNSServer" value="${esc(dns.server||'')}" placeholder="223.5.5.5"></div>
+            <div class="field"><label>端口</label><input id="setDNSPort" type="number" min="1" max="65535" value="${esc(dns.port||53)}"></div>
+          </div>
+          <div class="field"><label>备用服务器（每行一个，主 DNS 失败时使用）</label><textarea id="setDNSFallbacks" rows="2" placeholder="8.8.8.8&#10;1.1.1.1">${esc((dns.fallback_servers||[]).join('\n'))}</textarea></div>
+          <div class="settings-form">
+            <div class="field"><label>解析策略</label><select id="setDNSStrategy">
+              <option value="prefer_ipv4">prefer_ipv4</option>
+              <option value="prefer_ipv6">prefer_ipv6</option>
+              <option value="ipv4_only">ipv4_only</option>
+              <option value="ipv6_only">ipv6_only</option>
+              <option value="as_is">as_is</option>
+            </select></div>
+          </div>
+          <div class="settings-actions"><button class="btn secondary" onclick="saveSettings()">保存运行设置并重载</button></div>
         </div>
       </section>
 
@@ -379,7 +412,10 @@ function renderSettings(){
   </div>`;
   arrangeSettingsLayout();
   qs('#setMode').value=s.mode||'pool';
-  qs('#setProbe').value=probeTarget;
+  const strategySelect=qs('#setDNSStrategy');
+  if(strategySelect)strategySelect.value=dns.strategy||'prefer_ipv4';
+  const policySelect=qs('#setProbePolicy');
+  if(policySelect)policySelect.value=probePolicy;
   qs('#setPoolMode').value=pool.mode||'sequential';
   const logOutput=qs('#setLogOutput');
   if(logOutput)logOutput.value=logCfg.output==='file'?'file':'stdout';
@@ -474,18 +510,40 @@ function managementPayload(){
   else if(typed)payload.password=typed;
   return payload;
 }
+function probeTargetList(){
+  const raw=(qs('#setProbeTargets')?.value||'').split('\n');
+  const seen=new Set(),out=[];
+  for(const line of raw){
+    const value=line.trim();
+    if(!value||seen.has(value))continue;
+    seen.add(value);out.push(value);
+  }
+  return out;
+}
+function addProbeTarget(target){
+  const list=probeTargetList();
+  if(list.includes(target))return;
+  list.push(target);
+  const host=qs('#setProbeTargets');
+  if(host)host.value=list.join('\n');
+}
 async function saveSettings(){
   const current=S.settings||{},currentListener=current.listener||{},currentMulti=current.multi_port||{},currentMgmt=current.management||{},currentGeo=current.geoip||{};
   const ttlHours=Number(qs('#setSessionTTL')?.value)||0;
   if(ttlHours<1||ttlHours>8760){toast('会话 TTL 需在 1 到 8760 小时之间','err');return}
   const maxSessions=Number(qs('#setMaxSessions')?.value)||0;
   if(maxSessions<1||maxSessions>100000){toast('最大会话数需在 1 到 100000 之间','err');return}
+  const targets=probeTargetList();
+  if(!targets.length){toast('至少填写一个探测目标','err');return}
+  const invalid=targets.find(t=>/\s/.test(t)||t.length>200);
+  if(invalid){toast(`探测目标不合法：${invalid}`,'err');return}
   const stickyPort=Number(qs('#setStickyPort')?.value)||0;
   if(stickyPort<0||stickyPort>65535){toast('粘性端口需在 0 到 65535 之间','err');return}
   const body={
     mode:qs('#setMode').value,
     external_ip:qs('#setExternal').value.trim(),
-    probe_target:qs('#setProbe').value.trim(),
+    probe_targets:probeTargetList(),
+    probe_policy:qs('#setProbePolicy')?.value||'any',
     skip_cert_verify:qs('#setSkip').checked,
     listener:{address:qs('#setListenAddr').value.trim(),port:Number(qs('#setListenPort').value)||0,username:(qs('#setListenUser')?.value||'').trim(),password:qs('#setListenPass')?.value||''},
     multi_port:{address:qs('#setMultiAddr').value.trim(),base_port:Number(qs('#setMultiPort').value)||0,username:qs('#setMultiUser').value,password:qs('#setMultiPass').value},
@@ -498,6 +556,12 @@ async function saveSettings(){
       max_sessions:maxSessions,
       enabled:!!qs('#setStickyEnabled')?.checked,
       port:stickyPort
+    },
+    dns:{
+      server:(qs('#setDNSServer')?.value||'').trim(),
+      port:Number(qs('#setDNSPort')?.value)||53,
+      fallback_servers:(qs('#setDNSFallbacks')?.value||'').split('\n').map(v=>v.trim()).filter(Boolean),
+      strategy:qs('#setDNSStrategy')?.value||'prefer_ipv4'
     },
     geoip:{
       enabled:!!qs('#setGeoIPEnabled')?.checked,

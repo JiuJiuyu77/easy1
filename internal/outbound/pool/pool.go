@@ -950,8 +950,11 @@ const maxProbeHeaderBytes = 64 * 1024
 // httpProbe validates an HTTP response without reading its body. A socket that
 // emits one byte, a proxy authentication failure, or a quota/error response is
 // not a successful health check. Header size and deadlines bound the parser.
-func httpProbe(conn net.Conn, host string) (time.Duration, error) {
-	req := fmt.Sprintf("GET /generate_204 HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nUser-Agent: easy-proxies-health\r\n\r\n", host)
+func httpProbe(conn net.Conn, host, path string) (time.Duration, error) {
+	if path == "" {
+		path = "/"
+	}
+	req := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nUser-Agent: easy-proxies-health\r\n\r\n", path, host)
 	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	start := time.Now()
 	if _, err := io.WriteString(conn, req); err != nil {
@@ -977,13 +980,65 @@ func httpProbe(conn net.Conn, host string) (time.Duration, error) {
 // that accepts TCP but never sends an HTTP response would block on Read / the TLS
 // handshake forever, leaking goroutines and hanging the whole batch probe
 // (wg.Wait would never return, freezing the WebUI at "N/M").
-func (p *poolOutbound) probeMember(ctx context.Context, member *memberState, destination M.Socksaddr, host string, useTLS bool) (time.Duration, error) {
+// probeMember tries every configured endpoint in order. A node that blocks the
+// primary generate_204 host (or where it is unreachable) is still considered up
+// when a fallback endpoint answers, and only a total failure counts against it.
+func (p *poolOutbound) probeMember(ctx context.Context, member *memberState, endpoints []monitor.ProbeEndpoint) (time.Duration, error) {
+	if len(endpoints) == 0 {
+		return 0, errors.New("no probe endpoint configured")
+	}
+	requireAll := p.monitor != nil && p.monitor.ProbePolicy() == "all"
+	var lastErr error
+	var worst time.Duration
+	passed := 0
+	for _, endpoint := range endpoints {
+		latency, err := p.probeMemberOnce(ctx, member, endpoint)
+		if err != nil {
+			lastErr = err
+			if ctx.Err() != nil {
+				return 0, err
+			}
+			if requireAll {
+				// Strict mode: one failing target is enough to mark the node down.
+				if len(endpoints) > 1 {
+					lastErr = fmt.Errorf("%s (%s failed, all %d targets required)", err, endpoint.Label, len(endpoints))
+				}
+				break
+			}
+			continue
+		}
+		passed++
+		if latency > worst {
+			worst = latency
+		}
+		if !requireAll {
+			// Any mode: the first answering target is enough.
+			if member.entry != nil {
+				member.entry.RecordSuccessWithLatency(latency)
+			}
+			return latency, nil
+		}
+	}
+	if requireAll && passed == len(endpoints) {
+		if member.entry != nil {
+			member.entry.RecordSuccessWithLatency(worst)
+		}
+		return worst, nil
+	}
+	if !requireAll {
+		lastErr = fmt.Errorf("%s (all %d probe targets failed)", lastErr, len(endpoints))
+	}
+	if member.entry != nil && !errors.Is(ctx.Err(), context.Canceled) {
+		member.entry.RecordFailure(lastErr)
+	}
+	return 0, lastErr
+}
+
+func (p *poolOutbound) probeMemberOnce(ctx context.Context, member *memberState, endpoint monitor.ProbeEndpoint) (time.Duration, error) {
+	destination, host, useTLS, path := endpoint.Addr, endpoint.Host, endpoint.UseTLS, endpoint.Path
 	start := time.Now()
 	rawConn, err := member.outbound.DialContext(ctx, N.NetworkTCP, destination)
 	if err != nil {
-		if member.entry != nil && !errors.Is(ctx.Err(), context.Canceled) {
-			member.entry.RecordFailure(err)
-		}
 		return 0, err
 	}
 	// Watchdog: close the raw connection as soon as ctx is done so any blocked
@@ -1003,17 +1058,11 @@ func (p *poolOutbound) probeMember(ctx context.Context, member *memberState, des
 	// Strict mode: upgrade to TLS and verify the certificate chain so that
 	// nodes whose exit hijacks TLS (self-signed certs) fail the probe.
 	if conn, err = upgradeProbeConn(ctx, conn, host, useTLS); err != nil {
-		if member.entry != nil && !errors.Is(ctx.Err(), context.Canceled) {
-			member.entry.RecordFailure(err)
-		}
 		return 0, err
 	}
 
 	// Perform HTTP probe to measure actual latency (TTFB).
-	if _, err = httpProbe(conn, destination.AddrString()); err != nil {
-		if member.entry != nil && !errors.Is(ctx.Err(), context.Canceled) {
-			member.entry.RecordFailure(err)
-		}
+	if _, err = httpProbe(conn, host, path); err != nil {
 		return 0, err
 	}
 
@@ -1021,7 +1070,7 @@ func (p *poolOutbound) probeMember(ctx context.Context, member *memberState, des
 		return 0, err
 	}
 	duration := time.Since(start)
-	if member.entry != nil {
+	if false && member.entry != nil {
 		member.entry.RecordSuccessWithLatency(duration)
 	}
 	// Clear a permanent pool blacklist on successful probe — a node that passes
@@ -1039,12 +1088,12 @@ func (p *poolOutbound) makeProbeFunc(member *memberState) func(ctx context.Conte
 	if p.monitor == nil {
 		return nil
 	}
-	destination, host, useTLS, ok := p.monitor.DestinationForProbe()
-	if !ok {
+	endpoints := p.monitor.ProbeEndpoints()
+	if len(endpoints) == 0 {
 		return nil
 	}
 	return func(ctx context.Context) (time.Duration, error) {
-		return p.probeMember(ctx, member, destination, host, useTLS)
+		return p.probeMember(ctx, member, endpoints)
 	}
 }
 
@@ -1053,8 +1102,8 @@ func (p *poolOutbound) makeProbeByTagFunc(tag string) func(ctx context.Context) 
 	if p.monitor == nil {
 		return nil
 	}
-	destination, host, useTLS, ok := p.monitor.DestinationForProbe()
-	if !ok {
+	endpoints := p.monitor.ProbeEndpoints()
+	if len(endpoints) == 0 {
 		return nil
 	}
 	return func(ctx context.Context) (time.Duration, error) {
@@ -1080,7 +1129,7 @@ func (p *poolOutbound) makeProbeByTagFunc(tag string) func(ctx context.Context) 
 		if member == nil {
 			return 0, E.New("member not found: ", tag)
 		}
-		return p.probeMember(ctx, member, destination, host, useTLS)
+		return p.probeMember(ctx, member, endpoints)
 	}
 }
 

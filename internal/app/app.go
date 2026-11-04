@@ -40,6 +40,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		Enabled:          cfg.ManagementEnabled(),
 		Listen:           cfg.Management.Listen,
 		ProbeTarget:      cfg.Management.ProbeTarget,
+		ProbeTargets:     cfg.Management.ProbeTargets,
+		ProbePolicy:      cfg.ProbePolicyOrDefault(),
 		Password:         cfg.Management.Password,
 		ProxyUsername:    proxyUsername,
 		ProxyPassword:    proxyPassword,

@@ -41,6 +41,34 @@ func (c *Config) ValidateManagementSettings() error {
 	if _, err := normalizePoolMode(c.Pool.Mode); err != nil {
 		return err
 	}
+	switch c.ProbePolicyOrDefault() {
+	case "any", "all":
+	default:
+		return fmt.Errorf("probe_policy must be any or all")
+	}
+	for _, target := range c.Management.ProbeTargets {
+		if err := ValidateProbeTarget(target); err != nil {
+			return err
+		}
+	}
+	if c.DNS.Server != "" {
+		if strings.ContainsAny(c.DNS.Server, " \t\r\n/") {
+			return fmt.Errorf("dns.server must be a bare host or IP")
+		}
+		if c.DNS.Port < 1 || c.DNS.Port > 65535 {
+			return fmt.Errorf("dns.port must be between 1 and 65535")
+		}
+		valid := false
+		for _, strategy := range DNSStrategies {
+			if c.DNS.Strategy == strategy {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("dns.strategy must be one of %v", DNSStrategies)
+		}
+	}
 	for name, value := range map[string]string{"listener.address": c.Listener.Address, "multi_port.address": c.MultiPort.Address, "geoip.listen": c.GeoIP.Listen} {
 		if value != "" {
 			if _, err := netip.ParseAddr(value); err != nil {
@@ -84,6 +112,43 @@ func (c *Config) ValidateManagementSettings() error {
 	}
 	if c.GeoIP.Enabled && c.GeoIP.Port > 0 && c.GeoIP.Port == c.Sticky.Port && c.Sticky.Enabled {
 		return fmt.Errorf("geoip.port conflicts with sticky.port")
+	}
+	return nil
+}
+
+// ValidateProbeTarget accepts an http(s) URL or a host[:port] entry and rejects
+// values that cannot be parsed into a reachability check.
+func ValidateProbeTarget(target string) error {
+	value := strings.TrimSpace(target)
+	if value == "" {
+		return fmt.Errorf("probe target must not be empty")
+	}
+	if strings.ContainsAny(value, " \t\r\n") {
+		return fmt.Errorf("probe target %q must not contain spaces", value)
+	}
+	probe := value
+	if idx := strings.Index(probe, "://"); idx != -1 {
+		scheme := strings.ToLower(probe[:idx])
+		if scheme != "http" && scheme != "https" {
+			return fmt.Errorf("probe target %q must use http or https", value)
+		}
+		probe = probe[idx+3:]
+	}
+	if idx := strings.IndexAny(probe, "/?#"); idx != -1 {
+		probe = probe[:idx]
+	}
+	if probe == "" {
+		return fmt.Errorf("probe target %q is missing a host", value)
+	}
+	if host, port, err := net.SplitHostPort(probe); err == nil {
+		if host == "" {
+			return fmt.Errorf("probe target %q is missing a host", value)
+		}
+		if _, convErr := strconv.Atoi(port); convErr != nil || port == "" {
+			return fmt.Errorf("probe target %q has an invalid port", value)
+		}
+	} else if strings.Contains(probe, ":") {
+		return fmt.Errorf("probe target %q has an invalid port", value)
 	}
 	return nil
 }

@@ -334,7 +334,7 @@ func (s *Server) SetConfig(cfg *config.Config) {
 			// Re-derive the probe destination and strict-TLS mode so changes to
 			// probe_target / skip_cert_verify take effect on the long-lived
 			// manager without a full process restart.
-			s.mgr.SetProbeTarget(cfg.Management.ProbeTarget, cfg.SkipCertVerify)
+			s.mgr.SetProbeTargets(cfg.Management.ProbeTargets, cfg.ProbePolicyOrDefault(), cfg.SkipCertVerify)
 		}
 		// Sync proxy credentials based on mode
 		if cfg.Mode == "multi-port" || cfg.Mode == "hybrid" {
@@ -1161,6 +1161,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				// needs to know whether one is set.
 				"has_password":      cfg.Management.Password != "",
 				"probe_concurrency": cfg.ProbeConcurrencyOrDefault(),
+				"probe_targets":     append([]string(nil), cfg.Management.ProbeTargets...),
+				"probe_policy":      cfg.ProbePolicyOrDefault(),
+			}
+			resp["dns"] = map[string]any{
+				"server":           cfg.DNS.Server,
+				"port":             cfg.DNS.Port,
+				"fallback_servers": append([]string(nil), cfg.DNS.FallbackServers...),
+				"strategy":         cfg.DNS.Strategy,
 			}
 			resp["geoip"] = map[string]any{
 				"enabled":              cfg.GeoIP.Enabled,
@@ -1205,7 +1213,15 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				SessionTTL     *string `json:"session_ttl"`
 				MaxSessions    *int    `json:"max_sessions"`
 			} `json:"sticky,omitempty"`
-			Management *struct {
+			DNS *struct {
+				Server          string   `json:"server"`
+				Port            int      `json:"port"`
+				FallbackServers []string `json:"fallback_servers"`
+				Strategy        string   `json:"strategy"`
+			} `json:"dns,omitempty"`
+			ProbeTargets []string `json:"probe_targets,omitempty"`
+			ProbePolicy  *string  `json:"probe_policy,omitempty"`
+			Management   *struct {
 				Listen string `json:"listen"`
 				// nil keeps the current password, "" clears it, anything else sets it.
 				Password         *string `json:"password,omitempty"`
@@ -1361,6 +1377,34 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				candidate.Sticky.MaxSessions = *req.Sticky.MaxSessions
 			}
 		}
+		if req.DNS != nil {
+			candidate.DNS.Server = strings.TrimSpace(req.DNS.Server)
+			candidate.DNS.Port = req.DNS.Port
+			fallbacks := make([]string, 0, len(req.DNS.FallbackServers))
+			for _, raw := range req.DNS.FallbackServers {
+				if value := strings.TrimSpace(raw); value != "" {
+					fallbacks = append(fallbacks, value)
+				}
+			}
+			candidate.DNS.FallbackServers = fallbacks
+			candidate.DNS.Strategy = req.DNS.Strategy
+			candidate.NormalizeDNS()
+		}
+		if req.ProbeTargets != nil {
+			cleaned := make([]string, 0, len(req.ProbeTargets))
+			for _, raw := range req.ProbeTargets {
+				if value := strings.TrimSpace(raw); value != "" {
+					cleaned = append(cleaned, value)
+				}
+			}
+			candidate.Management.ProbeTargets = cleaned
+			if len(cleaned) > 0 {
+				candidate.Management.ProbeTarget = cleaned[0]
+			}
+		}
+		if req.ProbePolicy != nil {
+			candidate.Management.ProbePolicy = *req.ProbePolicy
+		}
 		if req.Management != nil {
 			candidate.Management.Listen = req.Management.Listen
 			if req.Management.Password != nil {
@@ -1416,6 +1460,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		s.cfgSrc.SkipCertVerify = candidate.SkipCertVerify
 		s.cfgSrc.Log = candidate.Log
 		s.cfgSrc.GeoIP = candidate.GeoIP
+		s.cfgSrc.DNS = candidate.DNS
 		s.cfgSrc.Mode = candidate.Mode
 		s.cfgSrc.Listener = candidate.Listener
 		s.cfgSrc.MultiPort = candidate.MultiPort

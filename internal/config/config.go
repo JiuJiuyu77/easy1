@@ -34,6 +34,7 @@ type Config struct {
 	Management          ManagementConfig          `yaml:"management"`
 	SubscriptionRefresh SubscriptionRefreshConfig `yaml:"subscription_refresh"`
 	GeoIP               GeoIPConfig               `yaml:"geoip"`
+	DNS                 DNSConfig                 `yaml:"dns"`
 	Log                 LogConfig                 `yaml:"log"`
 	WebDAV              WebDAVConfig              `yaml:"webdav"`
 	ChainProfiles       []proxychain.Profile      `yaml:"chain_profiles,omitempty" json:"chain_profiles,omitempty"`
@@ -45,6 +46,59 @@ type Config struct {
 	SkipCertVerify      bool                      `yaml:"skip_cert_verify"` // 全局跳过 SSL 证书验证
 
 	filePath string `yaml:"-"` // 配置文件路径，用于保存
+}
+
+// DNSConfig controls the resolver sing-box uses for node domains. Empty Server
+// leaves the resolver unconfigured (system DNS).
+type DNSConfig struct {
+	Server          string   `yaml:"server" json:"server"`
+	Port            int      `yaml:"port" json:"port"`
+	FallbackServers []string `yaml:"fallback_servers,omitempty" json:"fallback_servers,omitempty"`
+	Strategy        string   `yaml:"strategy" json:"strategy"`
+}
+
+// DNSStrategies are the domain strategies sing-box accepts.
+var DNSStrategies = []string{"", "as_is", "prefer_ipv4", "prefer_ipv6", "ipv4_only", "ipv6_only"}
+
+func normalizeDNSStrategy(strategy string) string {
+	value := strings.ToLower(strings.TrimSpace(strategy))
+	for _, allowed := range DNSStrategies {
+		if value == allowed {
+			return value
+		}
+	}
+	return "prefer_ipv4"
+}
+
+// NormalizeDNS applies defaults and de-duplicates the resolver settings.
+func (c *Config) NormalizeDNS() {
+	c.normalizeDNS()
+}
+
+func (c *Config) normalizeDNS() {
+	c.DNS.Server = strings.TrimSpace(c.DNS.Server)
+	if c.DNS.Port <= 0 || c.DNS.Port > 65535 {
+		c.DNS.Port = 53
+	}
+	c.DNS.Strategy = normalizeDNSStrategy(c.DNS.Strategy)
+	if c.DNS.Server == "" {
+		c.DNS.FallbackServers = nil
+		return
+	}
+	servers := make([]string, 0, len(c.DNS.FallbackServers))
+	seen := map[string]struct{}{strings.ToLower(c.DNS.Server): {}}
+	for _, raw := range c.DNS.FallbackServers {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		if _, dup := seen[strings.ToLower(value)]; dup {
+			continue
+		}
+		seen[strings.ToLower(value)] = struct{}{}
+		servers = append(servers, value)
+	}
+	c.DNS.FallbackServers = servers
 }
 
 // WebDAVConfig holds the remote backup target.
@@ -190,7 +244,14 @@ type ManagementConfig struct {
 	ProbeTarget      string `yaml:"probe_target"`
 	Password         string `yaml:"password"`          // WebUI 访问密码，为空则不需要密码
 	ProbeConcurrency int    `yaml:"probe_concurrency"` // 并发探测线程数（8-1024，默认 32），大规模节点可调高以加快探测
-	PprofEnabled     bool   `yaml:"pprof_enabled,omitempty"`
+	// ProbeTargets is the ordered list of reachability checks. Node health is
+	// decided by ProbePolicy: "any" (default) marks a node up when one target
+	// answers, "all" requires every target to answer. Custom URLs or
+	// host:port entries are accepted.
+	ProbeTargets []string `yaml:"probe_targets,omitempty" json:"probe_targets,omitempty"`
+	// ProbePolicy is "any" or "all".
+	ProbePolicy  string `yaml:"probe_policy,omitempty" json:"probe_policy,omitempty"`
+	PprofEnabled bool   `yaml:"pprof_enabled,omitempty"`
 }
 
 // SubscriptionRefreshConfig controls subscription auto-refresh and reload settings.
@@ -204,6 +265,53 @@ type SubscriptionRefreshConfig struct {
 	FetchConcurrency   int           `yaml:"fetch_concurrency"`    // 订阅抓取并发数，默认 16，最大 32
 	Test204            *bool         `yaml:"test_204,omitempty" json:"test_204,omitempty"`
 	SiteTargets        []string      `yaml:"site_targets,omitempty" json:"site_targets,omitempty"`
+}
+
+// DefaultProbeTargets are used when neither probe_target nor probe_targets is set.
+var DefaultProbeTargets = []string{
+	"https://www.gstatic.com/generate_204",
+	"https://www.github.com/",
+}
+
+const (
+	ProbePolicyAny = "any"
+	ProbePolicyAll = "all"
+)
+
+func normalizeProbePolicy(policy string) string {
+	switch strings.ToLower(strings.TrimSpace(policy)) {
+	case ProbePolicyAll:
+		return ProbePolicyAll
+	default:
+		return ProbePolicyAny
+	}
+}
+
+// normalizeProbeTargets merges the legacy single probe_target with the list,
+// trims entries and falls back to the defaults.
+func normalizeProbeTargets(single string, targets []string) []string {
+	result := make([]string, 0, len(targets)+1)
+	seen := make(map[string]struct{}, len(targets)+1)
+	for _, raw := range append([]string{strings.TrimSpace(single)}, targets...) {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		if _, dup := seen[value]; dup {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	if len(result) == 0 {
+		result = append(result, DefaultProbeTargets...)
+	}
+	return result
+}
+
+// ProbePolicyOrDefault reports the effective probe policy.
+func (c *Config) ProbePolicyOrDefault() string {
+	return normalizeProbePolicy(c.Management.ProbePolicy)
 }
 
 // Test204Enabled reports whether the generate_204 reachability probe is used;
@@ -464,8 +572,12 @@ func (c *Config) normalize() error {
 	if c.Management.Listen == "" {
 		c.Management.Listen = "127.0.0.1:9091"
 	}
-	if c.Management.ProbeTarget == "" {
-		c.Management.ProbeTarget = "www.apple.com:80"
+	c.normalizeDNS()
+	c.Management.ProbeTargets = normalizeProbeTargets(c.Management.ProbeTarget, c.Management.ProbeTargets)
+	c.Management.ProbePolicy = normalizeProbePolicy(c.Management.ProbePolicy)
+	// Keep the legacy single value in sync with the first configured target.
+	if len(c.Management.ProbeTargets) > 0 {
+		c.Management.ProbeTarget = c.Management.ProbeTargets[0]
 	}
 	if c.Management.Enabled == nil {
 		defaultEnabled := true
@@ -863,8 +975,12 @@ func (c *Config) NormalizeWithPortMap(portMap map[string]uint16) error {
 	if c.Management.Listen == "" {
 		c.Management.Listen = "127.0.0.1:9091"
 	}
-	if c.Management.ProbeTarget == "" {
-		c.Management.ProbeTarget = "www.apple.com:80"
+	c.normalizeDNS()
+	c.Management.ProbeTargets = normalizeProbeTargets(c.Management.ProbeTarget, c.Management.ProbeTargets)
+	c.Management.ProbePolicy = normalizeProbePolicy(c.Management.ProbePolicy)
+	// Keep the legacy single value in sync with the first configured target.
+	if len(c.Management.ProbeTargets) > 0 {
+		c.Management.ProbeTarget = c.Management.ProbeTargets[0]
 	}
 	if c.Management.Enabled == nil {
 		defaultEnabled := true
@@ -2096,7 +2212,7 @@ func (c *Config) SettingsSnapshot() Config {
 	return Config{
 		Mode: c.Mode, Listener: c.Listener, MultiPort: c.MultiPort, Pool: c.Pool,
 		Sticky: c.Sticky, Management: c.Management, ExternalIP: c.ExternalIP,
-		SkipCertVerify: c.SkipCertVerify, Log: c.Log, GeoIP: c.GeoIP,
+		SkipCertVerify: c.SkipCertVerify, Log: c.Log, GeoIP: c.GeoIP, DNS: c.DNS,
 		filePath: c.filePath,
 	}
 }
@@ -2144,6 +2260,7 @@ func (c *Config) saveSettings(includeSubscriptions bool) error {
 			saveCfg.SubscriptionRefresh = c.SubscriptionRefresh
 		}
 		saveCfg.GeoIP = c.GeoIP
+		saveCfg.DNS = c.DNS
 		saveCfg.Mode = c.Mode
 		saveCfg.Listener = c.Listener
 		saveCfg.MultiPort = c.MultiPort

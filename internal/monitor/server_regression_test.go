@@ -340,7 +340,7 @@ func TestSettingsRejectInvalidCoreFieldsBeforeSaving(t *testing.T) {
 				t.Fatalf("invalid settings status=%d: %s", w.Code, w.Body)
 			}
 			after, _ := os.ReadFile(path)
-			if string(after) != string(before) || cfg.Mode != original.Mode || cfg.Management != original.Management || cfg.Listener != original.Listener || cfg.Pool != original.Pool {
+			if string(after) != string(before) || cfg.Mode != original.Mode || !reflect.DeepEqual(cfg.Management, original.Management) || cfg.Listener != original.Listener || cfg.Pool != original.Pool {
 				t.Fatal("rejected settings modified file or runtime state")
 			}
 		})

@@ -112,7 +112,14 @@ multi_port:
 management:
   enabled: true                                      # 是否启用管理面板
   listen: 0.0.0.0:9091                               # 监听地址
-  probe_target: http://cp.cloudflare.com/generate_204  # 健康检查目标
+  # 探测目标：可填任意 http(s) URL 或 host:port，每行一个。
+  # probe_policy: any = 任一通过即算可用（默认，避免节点屏蔽某个 204 端点被误判）
+  #               all = 全部通过才算可用（更严格）
+  probe_targets:
+    - https://www.gstatic.com/generate_204
+    - https://www.github.com/
+  probe_policy: any
+  probe_target: https://www.gstatic.com/generate_204   # 兼容旧字段：等于 probe_targets 的第一项
   password: ""                                       # WebUI 访问密码，为空则不需要密码
   probe_concurrency: 32                              # 批量/周期探测并发数
   pprof_enabled: false                               # 仅在监听回环地址时生效，供性能排查用
@@ -120,6 +127,8 @@ management:
 # ───────────────────────────────────────────────────────────────
 # DNS 配置（用于节点域名解析，尤其是 VMess）
 # ───────────────────────────────────────────────────────────────
+# 节点域名解析。留空 server 则用系统 DNS。
+# server / fallback_servers 可写 udp://1.1.1.1、tcp://1.1.1.1、tls://dns.google 形式。
 dns:
   server: 223.5.5.5         # DNS 服务器地址
   fallback_servers:          # DNS 解析失败时的备用服务器（主 DNS 为国内 DNS 时自动添加）

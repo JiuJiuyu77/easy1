@@ -17,9 +17,13 @@ import (
 
 // Config mirrors user settings needed by the monitoring server.
 type Config struct {
-	Enabled          bool
-	Listen           string
-	ProbeTarget      string
+	Enabled     bool
+	Listen      string
+	ProbeTarget string
+	// ProbeTargets is the ordered list of reachability checks; ProbePolicy
+	// decides whether one ("any") or all ("all") of them must answer.
+	ProbeTargets     []string
+	ProbePolicy      string
 	Password         string
 	ProxyUsername    string // 代理池的用户名（用于导出）
 	ProxyPassword    string // 代理池的密码（用于导出）
@@ -114,6 +118,8 @@ type Manager struct {
 	probeHost        string // probe target hostname (TLS SNI when probeTLS is true)
 	probeTLS         bool   // strict mode: probe via TLS with certificate verification
 	probeReady       bool
+	probeTargets     []ProbeEndpoint
+	probePolicy      string
 	probeConcurrency int
 	mu               sync.RWMutex
 	nodes            map[string]*entry
@@ -181,6 +187,54 @@ func clampProbeConcurrency(n int) int {
 // decision from a probe target string. Strict TLS is enabled only for an https
 // target when skip_cert_verify is off. It is pure so both NewManager and the
 // live SetProbeTarget reload path share identical parsing.
+// ProbeEndpoint is one reachability check target: where to connect, which SNI
+// to present and which HTTP path to request. Nodes often block a specific
+// endpoint (a generate_204 host is a popular block target), so the pool walks a
+// list of endpoints and only marks the node down when every one fails.
+type ProbeEndpoint struct {
+	Addr   M.Socksaddr
+	Host   string
+	UseTLS bool
+	Path   string
+	Label  string
+}
+
+func resolveProbeEndpoint(raw string, skipCertVerify bool) (ProbeEndpoint, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ProbeEndpoint{}, false
+	}
+	useTLS := strings.HasPrefix(strings.ToLower(raw), "https://")
+	rest := raw
+	if idx := strings.Index(rest, "://"); idx != -1 {
+		rest = rest[idx+3:]
+	}
+	path := "/"
+	if idx := strings.Index(rest, "/"); idx != -1 {
+		path = rest[idx:]
+		rest = rest[:idx]
+	}
+	host, port, err := net.SplitHostPort(rest)
+	if err != nil {
+		host = rest
+		if useTLS {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	if strings.TrimSpace(host) == "" {
+		return ProbeEndpoint{}, false
+	}
+	return ProbeEndpoint{
+		Addr:   M.ParseSocksaddrHostPort(host, parsePort(port)),
+		Host:   host,
+		UseTLS: useTLS && !skipCertVerify,
+		Path:   path,
+		Label:  raw,
+	}, true
+}
+
 func resolveProbeTarget(probeTarget string, skipCertVerify bool) (dst M.Socksaddr, host string, useTLS, ready bool) {
 	if probeTarget == "" {
 		return M.Socksaddr{}, "", false, false
@@ -220,7 +274,11 @@ func NewManager(cfg Config) (*Manager, error) {
 		cancel:           cancel,
 		probeConcurrency: clampProbeConcurrency(cfg.ProbeConcurrency),
 	}
-	m.probeDst, m.probeHost, m.probeTLS, m.probeReady = resolveProbeTarget(cfg.ProbeTarget, cfg.SkipCertVerify)
+	targets := cfg.ProbeTargets
+	if len(targets) == 0 && strings.TrimSpace(cfg.ProbeTarget) != "" {
+		targets = []string{cfg.ProbeTarget}
+	}
+	m.SetProbeTargets(targets, cfg.ProbePolicy, cfg.SkipCertVerify)
 	return m, nil
 }
 
@@ -253,10 +311,60 @@ func (m *Manager) ProbeConcurrency() int {
 // a long-lived singleton, so without this the startup-time target/TLS mode
 // would persist until the process restarts.
 func (m *Manager) SetProbeTarget(probeTarget string, skipCertVerify bool) {
-	dst, host, useTLS, ready := resolveProbeTarget(probeTarget, skipCertVerify)
+	m.SetProbeTargets([]string{probeTarget}, "", skipCertVerify)
+}
+
+// SetProbeTargets configures the primary probe target plus fallbacks. A node is
+// only considered down when every endpoint fails, so a node that blocks the
+// primary generate_204 host is still recognised as reachable.
+func (m *Manager) SetProbeTargets(targets []string, policy string, skipCertVerify bool) {
+	endpoints := make([]ProbeEndpoint, 0, len(targets))
+	seen := make(map[string]struct{}, len(targets))
+	for _, raw := range targets {
+		endpoint, ok := resolveProbeEndpoint(raw, skipCertVerify)
+		if !ok {
+			continue
+		}
+		key := endpoint.Label
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		endpoints = append(endpoints, endpoint)
+	}
 	m.mu.Lock()
-	m.probeDst, m.probeHost, m.probeTLS, m.probeReady = dst, host, useTLS, ready
+	m.probeTargets = endpoints
+	m.probePolicy = policy
+	if len(endpoints) > 0 {
+		first := endpoints[0]
+		m.probeDst, m.probeHost, m.probeTLS, m.probeReady = first.Addr, first.Host, first.UseTLS, true
+	} else {
+		m.probeDst, m.probeHost, m.probeTLS, m.probeReady = M.Socksaddr{}, "", false, false
+	}
 	m.mu.Unlock()
+}
+
+// ProbePolicy reports whether one endpoint ("any") or all of them ("all") must
+// answer for a node to be considered reachable.
+func (m *Manager) ProbePolicy() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.probePolicy == "all" {
+		return "all"
+	}
+	return "any"
+}
+
+// ProbeEndpoints returns the ordered reachability targets (primary first).
+func (m *Manager) ProbeEndpoints() []ProbeEndpoint {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.probeTargets) == 0 {
+		return nil
+	}
+	out := make([]ProbeEndpoint, len(m.probeTargets))
+	copy(out, m.probeTargets)
+	return out
 }
 
 // StartPeriodicHealthCheck starts a background goroutine that periodically checks all nodes.

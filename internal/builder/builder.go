@@ -28,6 +28,111 @@ import (
 	"github.com/sagernet/sing/common/json/badoption"
 )
 
+// buildDNSOptions turns the configured resolver into sing-box DNS options.
+// Nodes reachable only by hostname (VMess links, subscription domains) need a
+// working resolver; without this sing-box falls back to the process resolver,
+// which ignores the configured server and strategy.
+func buildDNSOptions(cfg *config.Config) *option.DNSOptions {
+	if cfg == nil || strings.TrimSpace(cfg.DNS.Server) == "" {
+		return nil
+	}
+	servers := make([]option.DNSServerOptions, 0, 1+len(cfg.DNS.FallbackServers))
+	primary, err := newDNSServer("dns-primary", cfg.DNS.Server, cfg.DNS.Port)
+	if err != nil {
+		log.Printf("⚠️  DNS server %q ignored: %v", cfg.DNS.Server, err)
+		return nil
+	}
+	servers = append(servers, primary)
+	for index, fallback := range cfg.DNS.FallbackServers {
+		server, err := newDNSServer(fmt.Sprintf("dns-fallback-%d", index+1), fallback, 53)
+		if err != nil {
+			log.Printf("⚠️  DNS fallback %q ignored: %v", fallback, err)
+			continue
+		}
+		servers = append(servers, server)
+	}
+	if len(servers) == 0 {
+		return nil
+	}
+	return &option.DNSOptions{
+		RawDNSOptions: option.RawDNSOptions{
+			Servers:          servers,
+			Final:            "dns-primary",
+			DNSClientOptions: option.DNSClientOptions{Strategy: option.DomainStrategy(dnsStrategyConstant(cfg.DNS.Strategy))},
+		},
+	}
+}
+
+// dnsStrategyConstant maps the config string onto sing-box's strategy enum.
+func dnsStrategyConstant(strategy string) C.DomainStrategy {
+	switch strings.ToLower(strings.TrimSpace(strategy)) {
+	case "as_is":
+		return C.DomainStrategyAsIS
+	case "prefer_ipv6":
+		return C.DomainStrategyPreferIPv6
+	case "ipv4_only":
+		return C.DomainStrategyIPv4Only
+	case "ipv6_only":
+		return C.DomainStrategyIPv6Only
+	default:
+		return C.DomainStrategyPreferIPv4
+	}
+}
+
+// newDNSServer builds one sing-box DNS transport entry. Plain hosts use UDP,
+// tls://host[:port] uses DoT on 853. sing-box 1.12 rejects the deprecated
+// "legacy" transport when the options are constructed directly, so the modern
+// remote transports are used explicitly.
+func newDNSServer(tag, address string, defaultPort int) (option.DNSServerOptions, error) {
+	target := strings.TrimSpace(address)
+	if target == "" {
+		return option.DNSServerOptions{}, errors.New("empty address")
+	}
+	transportType := C.DNSTypeUDP
+	if idx := strings.Index(target, "://"); idx != -1 {
+		switch strings.ToLower(target[:idx]) {
+		case "udp":
+			transportType = C.DNSTypeUDP
+		case "tcp":
+			transportType = C.DNSTypeTCP
+		case "tls", "dot":
+			transportType = C.DNSTypeTLS
+			if defaultPort <= 0 || defaultPort == 53 {
+				defaultPort = 853
+			}
+		default:
+			return option.DNSServerOptions{}, fmt.Errorf("unsupported scheme in %q (use udp/tcp/tls)", address)
+		}
+		target = target[idx+3:]
+	}
+	host, port := target, defaultPort
+	if parsedHost, parsedPort, err := net.SplitHostPort(target); err == nil {
+		host = parsedHost
+		if value, convErr := strconv.Atoi(parsedPort); convErr == nil && value > 0 {
+			port = value
+		}
+	}
+	if strings.TrimSpace(host) == "" {
+		return option.DNSServerOptions{}, fmt.Errorf("missing host in %q", address)
+	}
+	if port <= 0 {
+		port = 53
+	}
+	if port > 65535 {
+		return option.DNSServerOptions{}, fmt.Errorf("invalid port in %q", address)
+	}
+	return option.DNSServerOptions{
+		Type: transportType,
+		Tag:  tag,
+		Options: &option.RemoteDNSServerOptions{
+			DNSServerAddressOptions: option.DNSServerAddressOptions{
+				Server:     host,
+				ServerPort: uint16(port),
+			},
+		},
+	}, nil
+}
+
 // Build converts high level config into sing-box Options tree.
 func Build(cfg *config.Config) (option.Options, error) {
 	if cfg == nil {
@@ -474,6 +579,9 @@ func Build(cfg *config.Config) (option.Options, error) {
 		Inbounds:  inbounds,
 		Outbounds: outbounds,
 		Route:     &route,
+	}
+	if dns := buildDNSOptions(cfg); dns != nil {
+		opts.DNS = dns
 	}
 	// Untagged local builds must not request an unavailable optional server.
 	// The controller is only needed for the management UI's traffic stream.
