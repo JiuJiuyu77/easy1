@@ -358,7 +358,11 @@ func newDirectProbeSession(tester *NodeTester, outbound adapter.Outbound, timeou
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			return outbound.DialContext(ctx, network, M.ParseSocksaddr(address))
 		},
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: tester.skipCertVerify},
+		// Probing answers "can this node reach the target at all". Airports and
+		// middleboxes routinely re-sign traffic, so verifying the *target's*
+		// certificate here would fail healthy nodes; only the node's own
+		// outbound TLS honours skip_cert_verify.
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	return &directProbeSession{
 		tester:    tester,
@@ -737,8 +741,10 @@ func (t *NodeTester) probeRuntimeListener(ctx context.Context, node ManagedNode,
 		proxyURL.User = url.UserPassword(t.runtimeProxyUsername, t.runtimeProxyPassword)
 	}
 	transport := &http.Transport{
-		Proxy:           http.ProxyURL(proxyURL),
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: t.skipCertVerify},
+		Proxy: http.ProxyURL(proxyURL),
+		// See newDirectProbeSession: reachability probes never verify the
+		// target's certificate.
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: timeout}
@@ -1032,8 +1038,14 @@ func classifyProbeError(err error) string {
 	if errors.As(err, &ne) && ne.Timeout() {
 		return "probe timeout"
 	}
-	if strings.Contains(strings.ToLower(err.Error()), "timeout") || strings.Contains(strings.ToLower(err.Error()), "deadline exceeded") {
+	lower := strings.ToLower(err.Error())
+	if strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded") {
 		return "probe timeout"
+	}
+	if strings.Contains(lower, "certificate") || strings.Contains(lower, "x509") {
+		// The target certificate is no longer verified by probes, so this comes
+		// from the node's own TLS handshake with its server.
+		return "节点 TLS 证书不被信任（如为自签/过期，可在设置里开启「跳过证书验证」）"
 	}
 	return err.Error()
 }

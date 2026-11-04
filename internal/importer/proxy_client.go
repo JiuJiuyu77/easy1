@@ -41,7 +41,8 @@ func NewHTTPClientForURI(ctx context.Context, buildFn OutboundBuilder, nodeID, u
 		Transport: &http.Transport{
 			Proxy: http.ProxyURL(proxyURL),
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: skipCertVerify,
+				// Site checks measure reachability, not the target's identity.
+				InsecureSkipVerify: true,
 			},
 		},
 	}

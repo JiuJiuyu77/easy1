@@ -227,9 +227,11 @@ func resolveProbeEndpoint(raw string, skipCertVerify bool) (ProbeEndpoint, bool)
 		return ProbeEndpoint{}, false
 	}
 	return ProbeEndpoint{
-		Addr:   M.ParseSocksaddrHostPort(host, parsePort(port)),
-		Host:   host,
-		UseTLS: useTLS && !skipCertVerify,
+		Addr: M.ParseSocksaddrHostPort(host, parsePort(port)),
+		Host: host,
+		// Keep TLS when the target is https, but never fail the probe on the
+		// target's certificate (see upgradeProbeConn).
+		UseTLS: useTLS,
 		Path:   path,
 		Label:  raw,
 	}, true

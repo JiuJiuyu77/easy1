@@ -17,7 +17,7 @@ function verificationPolicyHTML(scope,test204,targets,disabled=false){
   const count=selected.size+(test204?1:0);
   const probeButton=`<button type="button" class="site-selector ${test204?'selected':''}" aria-pressed="${test204?'true':'false'}" ${disabled?'disabled':''} onclick="setVerification204('${scope}',${test204?'false':'true'})"><strong>204 测速</strong><span>${test204?'必须成功':'不检测'}</span></button>`;
   const siteButtons=VERIFICATION_TARGETS.map(target=>`<button type="button" class="site-selector ${selected.has(target.id)?'selected':''}" aria-pressed="${selected.has(target.id)?'true':'false'}" ${disabled?'disabled':''} onclick="toggleVerificationTarget('${scope}','${target.id}')"><strong>${target.name}</strong><span>${selected.has(target.id)?'必须成功':'不检测'}</span></button>`).join('');
-  return `<div class="verification-policy"><div class="verification-policy-head"><div><strong>节点可用条件</strong><span>所选项目必须全部成功</span></div><span class="pill ${count?'green':'red'}">${count?`已选择 ${count} 项`:'未选择'}</span></div><div class="verification-targets">${probeButton}${siteButtons}</div></div>`;
+  return `<div class="verification-policy"><div class="verification-policy-head"><div><strong>节点可用条件</strong><span>所选项目必须全部成功</span></div><span class="pill ${count?'green':'red'}">${count?`已选择 ${count} 项`:'未选择'}</span></div><div class="verification-targets">${probeButton}${siteButtons}</div><p class="muted">探测已忽略目标证书，但站点验收（GitHub/Google）对被限速或被劫持的机场线路仍容易误判，建议以 204 为主、站点按需勾选。</p></div>`;
 }
 function verificationPolicy(scope){
   if(scope==='import')return {test_204:!!S.importTest204,site_targets:[...S.importSiteTargets]};

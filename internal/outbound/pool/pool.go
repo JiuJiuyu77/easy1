@@ -933,9 +933,13 @@ func upgradeProbeConn(ctx context.Context, conn net.Conn, host string, useTLS bo
 		return conn, nil
 	}
 	tlsConn := tls.Client(conn, &tls.Config{
-		ServerName:         host,
-		MinVersion:         tls.VersionTLS12,
-		InsecureSkipVerify: false,
+		ServerName: host,
+		MinVersion: tls.VersionTLS12,
+		// A health probe only asks "does traffic reach the target". Airports,
+		// captive portals and middleboxes commonly re-sign TLS, so verifying the
+		// target certificate would fail perfectly working nodes. The node's own
+		// outbound TLS still honours skip_cert_verify.
+		InsecureSkipVerify: true,
 	})
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		// Return the original connection so the caller's deferred Close keeps
