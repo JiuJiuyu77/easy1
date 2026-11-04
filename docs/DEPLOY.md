@@ -138,6 +138,21 @@ nodes:
     chain_profile_id: jp-relay
 ```
 
+**填错最常见的样子**（报 `vless uri missing uuid in userinfo` 就是这个）：
+
+| 症状 | 原因 | 正确写法 |
+| --- | --- | --- |
+| 只粘了 `remarks=…&tls=1&pbk=…` 这段 | 分享文本里 `vless://uuid@host:port?` 前缀丢了 | 从客户端/订阅里复制**整行** URI |
+| `vless://host:port?…` | `@` 前没有 UUID | `vless://<UUID>@host:port?…` |
+| `peer=`、`remarks=`、`tls=1`、`xtls=2`、`tfo`、`udp` | 这些是客户端私有参数，不是标准 VLESS 参数 | 名称用 `#备注`；TLS 用 `security=tls|reality`；服务器名用 `sni=`；其余可删 |
+| reality 节点报 `requires public_key (pbk)` | 少了 `pbk` | 补 `security=reality&pbk=<base64 32字节>&sid=<短ID>` |
+
+一个可用的 reality 例子：
+
+```
+vless://<UUID>@<地址>:443?security=reality&pbk=<公钥>&sid=<短ID>&fp=chrome&type=tcp&sni=<伪装域名>#韩国住宅IP
+```
+
 **会话路由**：需要 `pool` 或 `hybrid` 模式 + 共享入口用户名。设置页「会话路由与粘性」可开关、调 TTL（默认 24h）与上限（默认 10000）；「会话路由」页生成 `用户名.sessionID` 的 HTTP/SOCKS5 链接与 curl。停用后按普通用户名调度。
 
 ## 11. 升级与回滚

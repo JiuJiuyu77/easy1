@@ -207,6 +207,7 @@ EASY_PROXIES_IMAGE=ghcr.io/jiujiuyu77/easy1:sha-ada7392 docker compose up -d   #
 | 页面能开，保存设置报错/403 | 反代丢了 Host | 补 `proxy_set_header Host $host;` |
 | 仪表盘流量、日志不更新 | 反代缓冲了 SSE | 补 `proxy_buffering off;`、`proxy_read_timeout 3600s;` |
 | 导入成功但 WebUI 端口列表为空 | 节点没进池 | 导入时勾选自动加入池，或在候选列表手动提升 |
+| 前置代理保存报 `vless uri missing uuid in userinfo` | 节点 URI 缺 `vless://<UUID>@` 前缀（只粘了 `?` 后面的参数） | 复制整行 URI，见 [部署指南](./DEPLOY.md#10-新功能怎么用) |
 | `sticky.port conflicts with listener.port` | 粘性端口与共享入口冲突 | 设置页改粘性端口（默认 listener.port+1） |
 | 端口被占用启动失败 | 2323/9091/24000 段与面板或其它服务冲突 | 改 `listener.port` / `multi_port.base_port`，并同步防火墙 |
 | 面板里容器反复重启 | 目录权限或 sqlite 打不开 | `docker compose logs` 看首行错误，按上面两条处理 |

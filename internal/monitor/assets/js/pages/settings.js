@@ -55,8 +55,30 @@ function closeChainProfileEditor(){if(qs('#chainSaveButton')?.disabled)return;qs
 function chainProfileDraft(){return {id:qs('#chainEditID')?.value||'',name:qs('#chainEditName')?.value.trim()||'',enabled:!!qs('#chainEditEnabled')?.checked,hops:[{uri:qs('#chainEditURI')?.value.trim()||''}]}}
 function validateChainProfileDraft(profile){
   if(!profile.name)return '请填写前置代理名称';
-  if(!profile.hops[0].uri)return '请填写节点 URI';
-  if(!/^[a-z][a-z0-9+.-]*:\/\//i.test(profile.hops[0].uri))return '节点 URI 必须包含协议，例如 vless:// 或 socks5://';
+  const uri=String(profile.hops?.[0]?.uri||'').trim();
+  if(!uri)return '请填写节点 URI';
+  const problem=proxyURIProblem(uri);
+  if(problem)return problem;
+  return '';
+}
+// proxyURIProblem explains what is wrong with a pasted node URI, in the terms the
+// user can act on. Server-side parsing rejects the same shapes with technical
+// messages such as "vless uri missing uuid in userinfo".
+function proxyURIProblem(uri){
+  const value=String(uri||'').trim();
+  if(!/^[a-z][a-z0-9+.-]*:\/\//i.test(value))return '这不是完整的节点 URI：需要以 vless://、vmess://、trojan://、hysteria2://、socks5:// 等协议开头。如果你是从分享文本里复制的，请连同 vless:// 前缀和 UUID 一起复制整行。';
+  const scheme=value.slice(0,value.indexOf('://')).toLowerCase();
+  const rest=value.slice(value.indexOf('://')+3);
+  const authority=rest.split(/[/?#]/)[0];
+  if(!authority)return 'URI 缺少服务器地址与端口，形如 '+scheme+'://…@host:port';
+  if(['vless','trojan','anytls'].includes(scheme)&&!authority.includes('@'))return scheme+' URI 缺少 UUID/密码：应为 '+scheme+'://uuid@host:port（当前 @ 前为空）';
+  if(scheme==='vmess'&&!/^vmess:\/\/([A-Za-z0-9+/=_-]+|\{)/.test(value))return 'vmess URI 应为 base64 或 JSON 形式';
+  const query=rest.includes('?')?rest.slice(rest.indexOf('?')+1).split('#')[0]:'';
+  const params=new URLSearchParams(query);
+  if(params.has('remarks')&&!params.has('sni'))return '参数 remarks 不是标准字段：备注请写在 # 之后（vless://…@host:port?…#名称），TLS 服务器名用 sni=';
+  if(params.has('peer')&&!params.has('sni'))return '参数 peer= 不是标准写法，请改成 sni='+(params.get('peer')||'');
+  if((params.get('security')||'').toLowerCase()==='none'&&params.has('pbk'))return '带有 pbk 却写了 security=none，reality 节点应为 security=reality';
+  if((params.get('security')||'').toLowerCase()==='reality'&&!params.has('pbk'))return 'reality 节点缺少 pbk（公钥）';
   return '';
 }
 function setChainEditorStatus(message,type=''){const host=qs('#chainEditStatus');if(!host)return;host.textContent=message||'';host.className='inline-status '+(type||'')}
