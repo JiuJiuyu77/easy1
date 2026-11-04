@@ -115,3 +115,9 @@ test('a failed render surfaces the reason instead of a blank page', () => {
   assert.match(jsSource, /catch\(err\)\{\s*if\(isAbortError\(err\)\)return;\s*renderFatal\(err\)/);
   assert.match(jsSource, /docker compose logs/);
 });
+test('proxy-related write failures carry an actionable hint', () => {
+  assert.match(jsSource, /function apiErrorHint\(/);
+  assert.match(jsSource, /proxy_set_header Host \$host/);
+  assert.match(jsSource, /status===405/);
+  assert.match(jsSource, /status===502/);
+});

@@ -167,8 +167,21 @@ async function api(path,opt={}){
     qs('#authModal').classList.add('show');
     const err=new Error(message||'未授权');err.status=res.status;throw err;
   }
-  if(!res.ok){const err=new Error(message||res.statusText);err.status=res.status;throw err}
+  if(!res.ok){
+    const err=new Error(apiErrorHint(res.status,message)||message||res.statusText);
+    err.status=res.status;err.detail=message;throw err;
+  }
   return data;
+}
+// apiErrorHint turns the three failures that are almost always a proxy problem
+// into an instruction, because the raw body ("跨站请求已拒绝") does not say what
+// to change.
+function apiErrorHint(status,message){
+  const text=String(message||'');
+  if(status===403&&/跨站/.test(text))return '保存被拒（跨站请求已拒绝）：反向代理没有把原始 Host 传给服务端。请在站点配置里补 proxy_set_header Host $host; 后重载 Nginx（宝塔：网站 → 设置 → 反向代理 → 配置文件）。也可以先用 http://服务器IP:9091 直接访问验证。';
+  if(status===405)return '保存被拒（HTTP 405）：反向代理或 CDN 只放行了 GET/POST，请允许 PUT/DELETE，或改为宝塔 Nginx 直接反代到 127.0.0.1:9091。';
+  if(status===502||status===504)return `后端不可达（HTTP ${status}）：确认容器在运行（docker compose ps），反代目标应为 http://127.0.0.1:9091。`;
+  return '';
 }
 function jobEventValue(event){return event?.kind==='test'?event.test:event?.kind==='refresh'?event.refresh:event?.kind==='connectivity'?event.connectivity:null}
 function trimJobEventCache(){

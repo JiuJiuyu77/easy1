@@ -204,6 +204,8 @@ EASY_PROXIES_IMAGE=ghcr.io/jiujiuyu77/easy1:sha-ada7392 docker compose up -d   #
 | 拉镜像 `denied` / `unauthorized` | 未登录或 PAT 缺 `read:packages` | 重新 `docker login ghcr.io` |
 | 拉镜像超时 | ghcr.io 直连不稳 | 多试几次 / 用其它机器 `docker save` 上传后 `docker load` |
 | **页面只有裸 HTML**：无样式、图标黑块、登录框和弹窗全铺在页面上 | `/assets/css/*`、`/assets/js/*` 404（宝塔默认静态正则抢走，见第 3 节） | 把 `location ~ .*\.(js|css|png|svg...)$` 改成反代到 9091 |
+| **点任何"保存"都失败**，提示「跨站请求已拒绝」 | 反代没把原始 `Host` 传给后端，管理端的写操作同源校验一律拒绝（GET 正常，PUT/POST/DELETE 全挂） | 反代补 `proxy_set_header Host $host;` 后 `nginx -s reload`；若中间层是隧道/CDN 且不允许 PUT/DELETE，改用宝塔 Nginx 直接反代 |
+| 保存报 HTTP 405 | 中间层只放行 GET/POST | 同上，或在反代里允许 PUT/DELETE |
 | 页面能开，保存设置报错/403 | 反代丢了 Host | 补 `proxy_set_header Host $host;` |
 | 仪表盘流量、日志不更新 | 反代缓冲了 SSE | 补 `proxy_buffering off;`、`proxy_read_timeout 3600s;` |
 | 导入成功但 WebUI 端口列表为空 | 节点没进池 | 导入时勾选自动加入池，或在候选列表手动提升 |
