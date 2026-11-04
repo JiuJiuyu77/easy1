@@ -25,15 +25,15 @@ async function loadSessions(request){
 }
 function sessionTable(rows,enabled){
   if(!rows.length)return `<div class="connectivity-idle"><span>还没有活跃的会话绑定</span></div>`;
-  return `<div class="table-wrap"><table class="table"><thead><tr><th>会话 ID</th><th>绑定节点</th><th>最近使用</th><th>到期</th><th>切换</th><th></th></tr></thead><tbody>${
-    rows.map(row=>`<tr>
-      <td class="mono">${esc(row.id)}</td>
-      <td>${esc(row.node_name||row.node_tag||row.node_id||'-')}</td>
-      <td>${esc(relativeTime(row.last_seen))}</td>
-      <td>${esc(relativeTime(row.expires_at))}</td>
-      <td>${esc(Number(row.switch_count)||0)}</td>
-      <td class="row-actions"><button class="btn small secondary" type="button" ${enabled?'':'disabled'} onclick="resetSession('${esc(row.id)}')">重置</button></td>
-    </tr>`).join('')}</tbody></table></div>`;
+  const head=`<div class="bind-row bind-head"><span>会话 ID</span><span>绑定节点</span><span>最近使用</span><span>到期</span><span></span></div>`;
+  const body=rows.map(row=>`<div class="bind-row">
+      <strong class="mono" title="${esc(row.id)}">${esc(row.id)}</strong>
+      <span title="${esc(row.node_name||row.node_tag||row.node_id||'')}">${esc(row.node_name||row.node_tag||row.node_id||'-')}</span>
+      <span class="muted bind-meta">${esc(relativeTime(row.last_seen))}</span>
+      <span class="muted bind-meta">${esc(relativeTime(row.expires_at))}</span>
+      <button class="btn small secondary" type="button" ${enabled?'':'disabled'} onclick="resetSession('${esc(row.id)}')">重置</button>
+    </div>`).join('');
+  return `<div class="bind-list">${head}${body}</div>`;
 }
 function renderSessions(){
   const data=S.sessions||{};
@@ -43,12 +43,12 @@ function renderSessions(){
   qs('#view').innerHTML=`
   <div class="card">
     <div class="card-head"><div><h2>生成会话链接</h2><p class="muted">用「用户名.sessionID」访问共享入口，同一会话固定同一上游节点；普通用户名沿用池调度。</p></div></div>
-    ${enabled?'':`<div class="empty warn"><strong>当前不可用</strong><span>${esc(reason||'请先在设置中开启会话路由并配置共享入口用户名')}</span></div>`}
-    <div class="form-grid">
+    ${enabled?'':`<div class="empty warn"><strong>当前不可用</strong><span>${esc(reason||'请先在设置中开启会话路由并配置共享入口用户名')}</span><button class="btn small secondary" type="button" onclick="go('settings')">去设置</button></div>`}
+    <div class="settings-form">
       <div class="field"><label for="sessionID">会话 ID</label><input id="sessionID" maxlength="100" autocomplete="off" placeholder="例如 alice01" oninput="sessionPreview()"></div>
       <div class="field"><label for="sessionScheme">协议</label><select id="sessionScheme" onchange="sessionPreview()"><option value="http">HTTP</option><option value="socks5">SOCKS5</option></select></div>
-      <div class="field actions"><button class="btn secondary" type="button" onclick="randomSessionID()">随机生成</button><button class="btn" type="button" onclick="generateSessionLink()">生成链接</button></div>
     </div>
+    <div class="settings-actions"><button class="btn secondary" type="button" onclick="randomSessionID()">随机生成</button><button class="btn primary" type="button" onclick="generateSessionLink()">生成链接</button></div>
     <div class="connectivity-idle"><span id="sessionPreview" class="mono"></span></div>
     <div id="sessionLinks" class="links-box"></div>
   </div>
