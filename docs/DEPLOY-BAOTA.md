@@ -195,7 +195,17 @@ EASY_PROXIES_IMAGE=ghcr.io/jiujiuyu77/easy1:sha-ada7392 docker compose up -d   #
 
 ---
 
-## 7. 宝塔环境常见报错对照
+## 7. 一键自检
+
+保存/接口类问题先跑这个（在 `/www/wwwroot/easy1` 下，第二个参数填你的访问域名）：
+
+```bash
+sh scripts/diagnose.sh http://127.0.0.1:9091 https://你的域名
+```
+
+它依次检查容器状态、读接口、直连写接口、经反代的写接口，并按结果给出结论（反代缺 Host / 代理不放行 PUT / 后端异常）。
+
+## 8. 宝塔环境常见报错对照
 
 | 报错/现象 | 原因 | 处理 |
 | --- | --- | --- |

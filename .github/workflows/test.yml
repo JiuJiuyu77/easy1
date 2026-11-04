@@ -48,6 +48,7 @@ jobs:
       - name: UI and entrypoint fixture regressions
         run: |
           sh -n entrypoint.sh
+          sh -n scripts/diagnose.sh
           node --test scripts/test-ui.mjs scripts/test-entrypoint.mjs
       - name: Linux cross-platform builds
         run: |
