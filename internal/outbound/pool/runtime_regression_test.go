@@ -57,7 +57,7 @@ func TestHTTPProbeRequiresValidSuccessfulStatusAndBoundedHeaders(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			conn, _ := localProbeResponse(t, test.response)
-			_, err := httpProbe(conn, "fixture.test")
+			_, err := httpProbe(conn, "fixture.test", "/generate_204")
 			if (err == nil) != test.ok {
 				t.Fatalf("httpProbe error = %v, success want %v", err, test.ok)
 			}
@@ -82,7 +82,7 @@ func TestHTTPProbeDoesNotWaitForBody(t *testing.T) {
 	}()
 	defer func() { close(stop); <-done }()
 	result := make(chan error, 1)
-	go func() { _, err := httpProbe(client, "fixture.test"); result <- err }()
+	go func() { _, err := httpProbe(client, "fixture.test", "/generate_204"); result <- err }()
 	select {
 	case err := <-result:
 		if err != nil {
@@ -189,7 +189,8 @@ func TestCancelledProbeDoesNotRecordNodeFailure(t *testing.T) {
 	p := newSessionTestPool(nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := p.probeMember(ctx, member, M.ParseSocksaddr("fixture.test:80"), "fixture.test", false); err == nil {
+	endpoints := []monitor.ProbeEndpoint{{Addr: M.ParseSocksaddr("fixture.test:80"), Host: "fixture.test", Path: "/generate_204"}}
+	if _, err := p.probeMember(ctx, member, endpoints); err == nil {
 		t.Fatal("cancelled probe succeeded")
 	}
 	if snapshot := mgr.Snapshot()[0]; snapshot.FailureCount != 0 || snapshot.SuccessCount != 0 || snapshot.LastError != "" {
