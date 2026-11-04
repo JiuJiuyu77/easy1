@@ -156,6 +156,8 @@ function renderSettings(){
   const rateLimitSeconds=durationSeconds(pool.rate_limit_cooldown,300);
   const blacklistPin=pool.blacklist_failed_pin!==false;
   const probeConcurrency=Number(management.probe_concurrency)||32;
+  const hasMgmtPassword=!!management.has_password;
+  const geo=s.geoip||{};
   const logCfg=s.log||{};
   const sessionEnabled=sticky.session_enabled!==false;
   const sessionTTLHours=Math.max(1,Math.round(durationSeconds(sticky.session_ttl,86400)/3600));
@@ -190,6 +192,8 @@ function renderSettings(){
             <div class="field"><label>外部 IP</label><input id="setExternal" value="${esc(s.external_ip||'')}" placeholder="留空则使用当前访问地址"></div>
             <div class="field"><label>管理监听</label><input id="setMgmtListen" value="${esc(management.listen||'')}"></div>
             <div class="field"><label>探测并发</label><input id="setProbeConcurrency" type="number" min="1" max="1024" value="${esc(probeConcurrency)}"></div>
+            <div class="field"><label>管理密码</label><input id="setMgmtPassword" type="password" autocomplete="new-password" placeholder="${hasMgmtPassword?'已设置，留空不修改':'未设置，留空则无需登录'}"></div>
+            <label class="toggle-row wide"><input id="setClearMgmtPassword" type="checkbox" style="width:auto"><div><strong>清除管理密码</strong><span class="muted">勾选后保存即取消登录密码，任何拿到地址的人都能操作</span></div></label>
             <label class="toggle-row wide"><input id="setSkip" type="checkbox" ${s.skip_cert_verify?'checked':''} style="width:auto"><div><strong>跳过证书验证</strong></div></label>
           </div>
         </div>
@@ -203,6 +207,8 @@ function renderSettings(){
           <div class="settings-form">
             <div class="field"><label>Pool 监听地址</label><input id="setListenAddr" value="${esc(listener.address||'')}"></div>
             <div class="field"><label>Pool 端口</label><input id="setListenPort" type="number" value="${esc(listener.port||0)}"></div>
+            <div class="field"><label>Pool 用户名</label><input id="setListenUser" value="${esc(listener.username||'')}" placeholder="留空则入口不需要认证"></div>
+            <div class="field"><label>Pool 密码</label><input id="setListenPass" value="${esc(listener.password||'')}"></div>
             <div class="field"><label>Multi 地址</label><input id="setMultiAddr" value="${esc(multi.address||'')}"></div>
             <div class="field"><label>Multi 起始端口</label><input id="setMultiPort" type="number" value="${esc(multi.base_port||0)}"></div>
             <div class="field"><label>Multi 用户名</label><input id="setMultiUser" value="${esc(multi.username||'')}"></div>
@@ -246,6 +252,20 @@ function renderSettings(){
             <div class="field"><label>粘性端口</label><input id="setStickyPort" type="number" min="0" max="65535" value="${esc(sticky.port||0)}" placeholder="0 表示自动使用 Pool 端口 + 1"></div>
           </div>
           <div class="settings-actions"><button class="btn secondary" onclick="saveSettings()">保存运行设置并重载</button></div>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-head"><h2>GeoIP 地域路由</h2><span class="pill ${geo.enabled?'green':''}">${geo.enabled?'已启用':'未启用'}</span></div>
+        <div class="settings-section-body">
+          <label class="toggle-row"><input id="setGeoIPEnabled" type="checkbox" ${geo.enabled?'checked':''} style="width:auto"><div><strong>启用 GeoIP</strong><span class="muted">按国家/地区分流，需要 mmdb 数据库文件</span></div></label>
+          <div class="settings-form">
+            <div class="field"><label>数据库路径</label><input id="setGeoIPPath" value="${esc(geo.database_path||'')}" placeholder="./GeoLite2-Country.mmdb"></div>
+            <div class="field"><label>更新间隔</label><input id="setGeoIPInterval" value="${esc(geo.auto_update_interval||'24h')}" placeholder="24h"></div>
+            <div class="field"><label>监听地址</label><input id="setGeoIPListen" value="${esc(geo.listen||'')}" placeholder="留空不单独监听"></div>
+            <div class="field"><label>监听端口</label><input id="setGeoIPPort" type="number" value="${esc(geo.port||0)}"></div>
+          </div>
+          <label class="toggle-row"><input id="setGeoIPAuto" type="checkbox" ${geo.auto_update_enabled?'checked':''} style="width:auto"><div><strong>自动更新数据库</strong></div></label>
         </div>
       </section>
 
@@ -445,6 +465,15 @@ function allowedProbeTarget(value){
   const allowed=['https://www.gstatic.com/generate_204','https://cp.cloudflare.com/generate_204'];
   return allowed.includes(String(value||'').trim())?String(value).trim():allowed[0];
 }
+// Password semantics: omitted = keep, "" = clear, value = set.
+function managementPayload(){
+  const payload={listen:(qs('#setMgmtListen')?.value||'').trim(),probe_concurrency:Number(qs('#setProbeConcurrency')?.value)||0};
+  const clear=!!qs('#setClearMgmtPassword')?.checked;
+  const typed=qs('#setMgmtPassword')?.value||'';
+  if(clear)payload.password='';
+  else if(typed)payload.password=typed;
+  return payload;
+}
 async function saveSettings(){
   const current=S.settings||{},currentListener=current.listener||{},currentMulti=current.multi_port||{},currentMgmt=current.management||{},currentGeo=current.geoip||{};
   const ttlHours=Number(qs('#setSessionTTL')?.value)||0;
@@ -458,10 +487,10 @@ async function saveSettings(){
     external_ip:qs('#setExternal').value.trim(),
     probe_target:qs('#setProbe').value.trim(),
     skip_cert_verify:qs('#setSkip').checked,
-    listener:{address:qs('#setListenAddr').value.trim(),port:Number(qs('#setListenPort').value)||0,username:currentListener.username||'',password:currentListener.password||''},
+    listener:{address:qs('#setListenAddr').value.trim(),port:Number(qs('#setListenPort').value)||0,username:(qs('#setListenUser')?.value||'').trim(),password:qs('#setListenPass')?.value||''},
     multi_port:{address:qs('#setMultiAddr').value.trim(),base_port:Number(qs('#setMultiPort').value)||0,username:qs('#setMultiUser').value,password:qs('#setMultiPass').value},
     pool:{mode:qs('#setPoolMode').value.trim()||'sequential',failure_threshold:Number(qs('#setFail').value)||2,blacklist_duration:secondsDuration(qs('#setBlacklist').value,600),rotation_interval:secondsDuration(qs('#setRotateInterval').value,120),transient_cooldown:secondsDuration(qs('#setPoolTransient')?.value,60),rate_limit_cooldown:secondsDuration(qs('#setPoolRateLimit')?.value,300),blacklist_failed_pin:!!qs('#setBlacklistPin')?.checked},
-    management:{listen:qs('#setMgmtListen').value.trim(),password:currentMgmt.password||'',probe_concurrency:Number(qs('#setProbeConcurrency')?.value)||0},
+    management:managementPayload(),
     log:{output:qs('#setLogOutput')?.value||logCfg.output||'stdout',max_size:Number(qs('#setLogMaxSize')?.value)||0,max_backups:Number(qs('#setLogMaxBackups')?.value)||0,max_age:Number(qs('#setLogMaxAge')?.value)||0,compress:!!qs('#setLogCompress')?.checked},
     sticky:{
       session_enabled:qs('#setSessionEnabled')?.checked!==false,
@@ -471,17 +500,21 @@ async function saveSettings(){
       port:stickyPort
     },
     geoip:{
-      enabled:!!currentGeo.enabled,
-      database_path:currentGeo.database_path||'',
-      listen:currentGeo.listen||'',
-      port:currentGeo.port||0,
-      auto_update_enabled:!!currentGeo.auto_update_enabled,
-      auto_update_interval:currentGeo.auto_update_interval||''
+      enabled:!!qs('#setGeoIPEnabled')?.checked,
+      database_path:(qs('#setGeoIPPath')?.value||'').trim(),
+      listen:(qs('#setGeoIPListen')?.value||'').trim(),
+      port:Number(qs('#setGeoIPPort')?.value)||0,
+      auto_update_enabled:!!qs('#setGeoIPAuto')?.checked,
+      auto_update_interval:(qs('#setGeoIPInterval')?.value||'').trim()||'24h'
     }
   };
   try{
     const res=await api('/api/settings',{method:'PUT',body:JSON.stringify(body)});
     toast(res?.message||'设置已保存');
+    if(res?.auth_changed){
+      const cleared=!qs('#setMgmtPassword')?.value;
+      toast(cleared?'管理密码已清除，任何人都能访问管理端':'管理密码已更新，其它设备需要重新登录','err');
+    }
     await api('/api/reload',{method:'POST'});
     await refresh();
   }catch(err){toast(err.message,'err')}

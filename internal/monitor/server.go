@@ -1156,8 +1156,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				"max_sessions":    cfg.Sticky.MaxSessionsOrDefault(),
 			}
 			resp["management"] = map[string]any{
-				"listen":            cfg.Management.Listen,
-				"password":          cfg.Management.Password,
+				"listen": cfg.Management.Listen,
+				// Never ship the management password to the browser; the UI only
+				// needs to know whether one is set.
+				"has_password":      cfg.Management.Password != "",
 				"probe_concurrency": cfg.ProbeConcurrencyOrDefault(),
 			}
 			resp["geoip"] = map[string]any{
@@ -1204,9 +1206,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				MaxSessions    *int    `json:"max_sessions"`
 			} `json:"sticky,omitempty"`
 			Management *struct {
-				Listen           string `json:"listen"`
-				Password         string `json:"password"`
-				ProbeConcurrency int    `json:"probe_concurrency"`
+				Listen string `json:"listen"`
+				// nil keeps the current password, "" clears it, anything else sets it.
+				Password         *string `json:"password,omitempty"`
+				ProbeConcurrency int     `json:"probe_concurrency"`
 			} `json:"management,omitempty"`
 			Log *struct {
 				Output     string `json:"output"`
@@ -1360,7 +1363,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Management != nil {
 			candidate.Management.Listen = req.Management.Listen
-			candidate.Management.Password = req.Management.Password
+			if req.Management.Password != nil {
+				candidate.Management.Password = *req.Management.Password
+			}
 			if req.Management.ProbeConcurrency > 0 {
 				candidate.Management.ProbeConcurrency = req.Management.ProbeConcurrency
 			}
