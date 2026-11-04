@@ -139,7 +139,28 @@ docker run -d --name easy_proxies --restart unless-stopped \
 
 - **`proxy_set_header Host $host;` 不能省**：管理端的写操作会校验 Origin/Referer 与 Host 是否同源，丢了 Host 会出现「保存失败/403」。
 - **`proxy_buffering off` 不能省**：否则仪表盘实时流量、日志控制台、任务进度（SSE）不刷新。
+- **宝塔默认的静态资源规则会截胡 `/assets/`**。宝塔建站默认带这两段（正则 location 优先级高于 `location /`）：
+
+```nginx
+location ~ .*\.(gif|jpg|jpeg|png|bmp|swf)$ { expires 30d; }
+location ~ .*\.(js|css)?$                  { expires 12h; }
+```
+
+  它们没有 `proxy_pass`，于是 `/assets/js/core.js`、`/assets/css/base.css` 会去**站点根目录**找文件并 404，
+  表现就是「页面只有裸 HTML：没有样式、图标是黑块、弹窗和表单全铺开」。把它们改成反代，或直接删掉：
+
+```nginx
+location ~ .*\.(js|css|png|svg|gif|jpg|jpeg|ico)$ {
+    proxy_pass http://127.0.0.1:9091;
+    proxy_set_header Host $host;
+    proxy_buffering off;
+    expires -1;
+}
+```
+
 - 反代生效后，WebUI 只监听 127.0.0.1:9091，安全组里**不用**再开放 9091。
+
+改完执行 `nginx -t && nginx -s reload`（宝塔里点「保存」会自动重载），然后**强刷浏览器**（iOS Safari 长按刷新 → 无痕窗口最稳）。
 
 ---
 
@@ -182,6 +203,7 @@ EASY_PROXIES_IMAGE=ghcr.io/jiujiuyu77/easy1:sha-ada7392 docker compose up -d   #
 | `nodes.txt is a directory` | 文件级挂载但宿主机文件不存在，Docker 建了目录 | 删掉该目录后 `touch data/nodes.txt`，或改用目录挂载 |
 | 拉镜像 `denied` / `unauthorized` | 未登录或 PAT 缺 `read:packages` | 重新 `docker login ghcr.io` |
 | 拉镜像超时 | ghcr.io 直连不稳 | 多试几次 / 用其它机器 `docker save` 上传后 `docker load` |
+| **页面只有裸 HTML**：无样式、图标黑块、登录框和弹窗全铺在页面上 | `/assets/css/*`、`/assets/js/*` 404（宝塔默认静态正则抢走，见第 3 节） | 把 `location ~ .*\.(js|css|png|svg...)$` 改成反代到 9091 |
 | 页面能开，保存设置报错/403 | 反代丢了 Host | 补 `proxy_set_header Host $host;` |
 | 仪表盘流量、日志不更新 | 反代缓冲了 SSE | 补 `proxy_buffering off;`、`proxy_read_timeout 3600s;` |
 | 导入成功但 WebUI 端口列表为空 | 节点没进池 | 导入时勾选自动加入池，或在候选列表手动提升 |
