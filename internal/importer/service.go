@@ -108,6 +108,8 @@ type Service struct {
 	connectivityCancelsMu sync.Mutex
 	connectivityCancels   map[string]context.CancelFunc
 	connectivityProbePass func(context.Context, []ManagedNode, map[string]map[string]struct{}, int, time.Duration) <-chan connectivityProbeEvent
+	sourceMetaMu          sync.RWMutex
+	sourceMeta            map[string]*sourceMetaEntry
 	jobEventsMu           sync.Mutex
 	jobEventSubs          map[uint64]chan JobEvent
 	jobEventNext          uint64
@@ -2300,6 +2302,62 @@ func (s *Service) Parse(req ParseRequest) (ParseResponse, error) {
 	}, nil
 }
 
+// sourceMetaEntry is the per-source fetch memory: which client identity worked
+// and the quota headers from the last successful pull.
+type sourceMetaEntry struct {
+	UserAgent    string
+	Headers      map[string]string
+	Subscription *SubscriptionInfo
+	LastError    string
+	Updated      time.Time
+}
+
+func sourceMetaKey(rawURL, tagPrefix string) string {
+	return strings.TrimSpace(rawURL) + "\x00" + strings.TrimSpace(tagPrefix)
+}
+
+func (s *Service) rememberSourceSuccess(rawURL, tagPrefix string, ref *NodeSourceRef, result subfetch.Result) {
+	key := sourceMetaKey(rawURL, tagPrefix)
+	entry := &sourceMetaEntry{Updated: time.Now()}
+	if ref != nil {
+		entry.UserAgent = ref.UserAgent
+		if len(ref.Headers) > 0 {
+			entry.Headers = make(map[string]string, len(ref.Headers))
+			for header, value := range ref.Headers {
+				entry.Headers[header] = value
+			}
+		}
+	}
+	if result.Header != nil {
+		entry.Subscription = parseSubscriptionUserinfo(result.Header)
+	}
+	s.sourceMetaMu.Lock()
+	if s.sourceMeta == nil {
+		s.sourceMeta = make(map[string]*sourceMetaEntry)
+	}
+	if previous := s.sourceMeta[key]; previous != nil && entry.Subscription == nil {
+		entry.Subscription = previous.Subscription
+	}
+	s.sourceMeta[key] = entry
+	s.sourceMetaMu.Unlock()
+}
+
+func (s *Service) rememberSourceFailure(rawURL, tagPrefix string, err error) {
+	key := sourceMetaKey(rawURL, tagPrefix)
+	s.sourceMetaMu.Lock()
+	if s.sourceMeta == nil {
+		s.sourceMeta = make(map[string]*sourceMetaEntry)
+	}
+	entry := s.sourceMeta[key]
+	if entry == nil {
+		entry = &sourceMetaEntry{}
+		s.sourceMeta[key] = entry
+	}
+	entry.LastError = FetchDiagnosis(err)
+	entry.Updated = time.Now()
+	s.sourceMetaMu.Unlock()
+}
+
 func (s *Service) fetchImportSubscription(ctx context.Context, rawURL string, req ParseRequest, timeout time.Duration) ([]byte, error) {
 	options := subfetch.Options{
 		Timeout: timeout,
@@ -2307,7 +2365,14 @@ func (s *Service) fetchImportSubscription(ctx context.Context, rawURL string, re
 			return s.fetchSubscriptionViaPool(fallbackCtx, target, headers, req.TagPrefix, 0, nil)
 		},
 	}
-	return subfetch.Fetch(ctx, rawURL, options)
+	ref := NodeSourceRef{TagPrefix: req.TagPrefix, UserAgent: req.UserAgent, Headers: req.Headers}
+	result, updated, err := s.fetchSubscriptionWithProfiles(ctx, rawURL, ref, options)
+	if err != nil {
+		s.rememberSourceFailure(rawURL, req.TagPrefix, err)
+		return nil, err
+	}
+	s.rememberSourceSuccess(rawURL, req.TagPrefix, &updated, result)
+	return result.Body, nil
 }
 
 func importSourceForParse(req ParseRequest) string {
@@ -4209,6 +4274,19 @@ func (s *Service) ListImportSources() ([]ImportSourceSummary, error) {
 		}
 		return result[i].Key < result[j].Key
 	})
+	// Merge per-source fetch memory: the client string that worked, quota
+	// headers from the last pull and the last fetch error.
+	s.sourceMetaMu.RLock()
+	for index := range result {
+		entry := s.sourceMeta[sourceMetaKey(result[index].Source, result[index].TagPrefix)]
+		if entry == nil {
+			continue
+		}
+		result[index].UserAgent = entry.UserAgent
+		result[index].Subscription = entry.Subscription
+		result[index].LastError = entry.LastError
+	}
+	s.sourceMetaMu.RUnlock()
 	return result, nil
 }
 

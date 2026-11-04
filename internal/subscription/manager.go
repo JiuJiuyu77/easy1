@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -80,9 +81,10 @@ type Manager struct {
 	pendingSettings bool
 	pendingBaseline *config.Config
 
-	lastSubHash      string
-	lastNodesModTime time.Time
-	lastNodesSize    int64
+	consecutiveFailures int
+	lastSubHash         string
+	lastNodesModTime    time.Time
+	lastNodesSize       int64
 
 	// sourceRefresher is set when the WebUI manages import sources; the worker
 	// then delegates each tick to the importer instead of loading every
@@ -158,6 +160,20 @@ func New(cfg *config.Config, boxMgr *boxmgr.Manager, opts ...Option) *Manager {
 
 // Start starts the worker even when periodic refresh is disabled or URLs are
 // not yet configured. It is idempotent.
+
+// jitterDuration spreads a duration by ratio (+/-) with a small random offset.
+func jitterDuration(base time.Duration, ratio float64) time.Duration {
+	if base <= 0 || ratio <= 0 {
+		return base
+	}
+	span := int64(float64(base) * ratio)
+	if span <= 0 {
+		return base
+	}
+	offset := time.Duration(rand.Int63n(2*span+1)) - time.Duration(span)
+	return base + offset
+}
+
 func (m *Manager) Start() {
 	m.startOnce.Do(func() { go m.refreshLoop() })
 }
@@ -332,6 +348,22 @@ func (m *Manager) refreshLoop() {
 		if interval <= 0 {
 			interval = time.Hour
 		}
+		// Jitter the schedule (+-10%) so a fleet of instances does not hit the
+		// provider at the same instant, and back off exponentially after
+		// consecutive failures so a rate-limited account can recover.
+		interval = jitterDuration(interval, 0.1)
+		if m.consecutiveFailures > 0 && m.status.LastError != "" {
+			backoff := interval
+			for i := 0; i < m.consecutiveFailures && backoff < 30*time.Minute; i++ {
+				backoff *= 2
+			}
+			if backoff > 30*time.Minute {
+				backoff = 30 * time.Minute
+			}
+			if backoff > interval {
+				interval = backoff
+			}
+		}
 		if !m.stopped && m.baseCfg.SubscriptionRefresh.Enabled && len(m.baseCfg.Subscriptions) > 0 {
 			if timer == nil {
 				timer = time.NewTimer(interval)
@@ -417,8 +449,10 @@ func (m *Manager) doRefresh(cfg *config.Config, version uint64) error {
 		m.status.LastRefresh = time.Now()
 		if err != nil {
 			m.status.LastError = err.Error()
+			m.consecutiveFailures++
 		} else {
 			m.status.LastError = ""
+			m.consecutiveFailures = 0
 		}
 		m.mu.Unlock()
 		if err != nil {

@@ -350,6 +350,7 @@ function renderSettings(){
       ${sources.length?`<div class="stack">${sources.map((src,i)=>{const tag=String(src.tag_prefix||'').trim(),binding=chainBindingLabel(src);return `<div class="source-row">
         <label class="source-row-select"><input type="checkbox" data-binding-tag="${esc(tag)}" aria-label="选择 ${esc(tag)}" ${tag&&S.selectedBindingTags.has(tag)?'checked':''} ${tag&&!bindingRunning&&!refreshing?'':'disabled'} onchange="toggleBindingTag(this.dataset.bindingTag,this.checked)"></label>
         <div style="flex:1;min-width:0">
+          ${src.last_error?`<p class="action-status err">拉取失败：${esc(src.last_error)}</p>`:''}
           <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
             <span class="pill green">${esc(src.tag_prefix||'local')}</span>
             <span class="pill">${esc(importSourceType(src))}</span>
@@ -358,6 +359,8 @@ function renderSettings(){
             <span class="value-pill green">池内 ${esc(src.pool||0)}</span>
             <span class="value-pill red">失败 ${esc(src.failed||0)}</span>
             <span class="value-pill amber">候选 ${esc(src.candidate||0)}</span>
+            ${src.subscription?`<span class="value-pill ${src.subscription.total>0&&src.subscription.upload+src.subscription.download>=src.subscription.total?'red':''}">流量 ${formatBytes(src.subscription.upload+src.subscription.download)}${src.subscription.total>0?' / '+formatBytes(src.subscription.total):''}</span>${src.subscription.expire?`<span class="value-pill">到期 ${esc(new Date(src.subscription.expire).toLocaleDateString())}</span>`:''}`:''}
+            ${src.user_agent?`<span class="value-pill muted" title="该订阅成功响应使用的客户端 UA">UA ${esc(src.user_agent.slice(0,22))}</span>`:''}
           </div>
           <div style="margin-top:6px"><code class="source-value">${esc(importSourceText(src))}</code></div>
           <div class="muted" style="margin-top:6px">更新：${esc(fmtDate(src.updated_at))}</div>

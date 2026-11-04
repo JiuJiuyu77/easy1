@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 前置代理的"测试连接"改为**经该链访问 GitHub**（`https://github.com/`，要求 2xx 且页面含 github 标记），与节点导入里的站点检测口径一致；此前用 generate_204 只能证明通了一个 204，无法说明链能承载真实流量。
 
 ### Added
+- **订阅拉取适配机场限制**：按源可配 `user_agent` / `headers`（Referer 等）；未配置时自动按 clash-verge → clash.meta → v2rayNG → Shadowrocket → 默认 依次尝试，并记住该源成功的客户端 UA（进程内）。返回内容不是订阅（HTML 错误页/空响应）时同样换 UA 重试。
+- **拉取失败可读诊断**：403/401（UA 或登录限制）、404/410（地址失效）、429（限流）、5xx、证书错误、超时分别给出可操作提示，展示在导入来源卡片上。
+- **订阅配额与到期**：解析 `Subscription-Userinfo`（upload/download/total/expire），导入来源卡片显示已用/总量与到期日。
+- **刷新抖动与退避**：定时刷新在间隔上叠加 ±10% 抖动，连续失败按 2^n 退避（上限 30 分钟），避免整点风暴与限流。
+- 说明：拉取回退（`auto` 策略按顺序尝试池节点）此前已具备，本次确认并纳入文档。
 - **探测目标支持多目标 + 策略**：`management.probe_targets`（任意 http(s) URL 或 host:port，可自定义，UI 每行一个并带预设）与 `management.probe_policy`（`any` 任一通过即算可用 / `all` 全部通过才算可用）。探测按目标顺序回退，节点屏蔽某个 generate_204 端点时不再被误判为不可用；请求路径也不再写死 `/generate_204`。
 - **DNS 解析**：`dns` 段（server/port/fallback_servers/strategy）真正接入 sing-box（udp/tcp/tls 传输 + 主/备服务器 + 解析策略），设置页可编辑；节点只给域名时不再依赖系统解析器。
 - **设置页补齐上游缺项**：管理密码（留空不修改、可勾选清除）、共享入口用户名/密码、GeoIP（启用/数据库/监听/端口/自动更新/间隔）、探测并发。`GET /api/settings` 不再回传管理密码明文，只返回 `has_password`；`PUT` 省略 `password` 表示保持不变，`""` 表示清除。

@@ -54,6 +54,11 @@ type NodeSourceRef struct {
 	Format         string `json:"format,omitempty"`
 	ChainProfileID string `json:"chain_profile_id,omitempty"`
 	FetchPolicy    string `json:"fetch_policy,omitempty"`
+	// UserAgent remembers the client string this source answered to; when empty
+	// the fetch layer tries the known clients in turn.
+	UserAgent string `json:"user_agent,omitempty"`
+	// Headers are extra request headers for this source (Referer, ...).
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 func (n ManagedNode) ToConfigNode() config.NodeConfig {
@@ -116,6 +121,10 @@ type ParseRequest struct {
 	FetchPolicy    string `json:"fetch_policy,omitempty"`
 	ContentFormat  string `json:"content_format,omitempty"`
 	ProxyProtocol  string `json:"proxy_protocol,omitempty"`
+	// UserAgent / Headers let a source opt into a specific client identity.
+	// Empty UserAgent means "try the known clients until one answers".
+	UserAgent string            `json:"user_agent,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
 }
 
 type ParseResponse struct {
@@ -124,23 +133,59 @@ type ParseResponse struct {
 	Nodes    []ManagedNode `json:"nodes"`
 }
 
+// SubscriptionInfo is the quota/expiry metadata providers send in the
+// Subscription-Userinfo header.
+type SubscriptionInfo struct {
+	Upload   int64     `json:"upload"`
+	Download int64     `json:"download"`
+	Total    int64     `json:"total"`
+	Expire   time.Time `json:"expire,omitempty"`
+	Updated  time.Time `json:"updated,omitempty"`
+}
+
+// UsedPercent is the consumed share of the quota, or -1 when unlimited.
+func (i SubscriptionInfo) UsedPercent() float64 {
+	if i.Total <= 0 {
+		return -1
+	}
+	used := i.Upload + i.Download
+	if used < 0 {
+		used = 0
+	}
+	return float64(used) * 100 / float64(i.Total)
+}
+
+// Exhausted reports whether the quota ran out or the subscription expired.
+func (i SubscriptionInfo) Exhausted(now time.Time) bool {
+	if i.Total > 0 && i.Upload+i.Download >= i.Total {
+		return true
+	}
+	return !i.Expire.IsZero() && now.After(i.Expire)
+}
+
 type ImportSourceSummary struct {
-	Key            string    `json:"key"`
-	ImportID       string    `json:"import_id,omitempty"`
-	Mode           string    `json:"mode"`
-	Format         string    `json:"format"`
-	TagPrefix      string    `json:"tag_prefix"`
-	Source         string    `json:"source"`
-	Total          int       `json:"total"`
-	Pool           int       `json:"pool"`
-	Candidate      int       `json:"candidate"`
-	Failed         int       `json:"failed"`
-	Refreshable    bool      `json:"refreshable"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	ChainProfileID string    `json:"chain_profile_id,omitempty"`
-	ChainBinding   string    `json:"chain_binding"`
-	FetchPolicy    string    `json:"fetch_policy,omitempty"`
+	Key            string            `json:"key"`
+	ImportID       string            `json:"import_id,omitempty"`
+	Mode           string            `json:"mode"`
+	Format         string            `json:"format"`
+	TagPrefix      string            `json:"tag_prefix"`
+	Source         string            `json:"source"`
+	Total          int               `json:"total"`
+	Pool           int               `json:"pool"`
+	Candidate      int               `json:"candidate"`
+	Failed         int               `json:"failed"`
+	Refreshable    bool              `json:"refreshable"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
+	ChainProfileID string            `json:"chain_profile_id,omitempty"`
+	ChainBinding   string            `json:"chain_binding"`
+	FetchPolicy    string            `json:"fetch_policy,omitempty"`
+	UserAgent      string            `json:"user_agent,omitempty"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	// Subscription is the quota/expiry metadata from the last successful fetch.
+	Subscription *SubscriptionInfo `json:"subscription,omitempty"`
+	// LastError is the human readable reason the last fetch failed.
+	LastError string `json:"last_error,omitempty"`
 }
 
 const (

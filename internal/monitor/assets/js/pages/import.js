@@ -93,7 +93,13 @@ function importPlaceholder(){
   return 'proxies:\n  - name: ...';
 }
 function importFields(){
-  return `${S.importKind==='host_port'?`<div class="row"><div class="field" style="min-width:220px"><label for="proxyProtocol">代理协议</label><select id="proxyProtocol" onchange="S.proxyProtocol=this.value"><option value="http">HTTP</option><option value="socks5">SOCKS5</option></select></div><button class="btn secondary" onclick="qs('#hostPortFile').click()">选择 TXT 文件</button><input id="hostPortFile" type="file" accept=".txt,text/plain" hidden onchange="loadHostPortFile(this.files?.[0])"></div>`:''}<div class="field"><label for="importContent">${esc(importInputLabel())}</label><textarea id="importContent" placeholder="${esc(importPlaceholder())}" oninput="S.importText=this.value"></textarea></div>`;
+  return `${S.importKind==='host_port'?`<div class="row"><div class="field" style="min-width:220px"><label for="proxyProtocol">代理协议</label><select id="proxyProtocol" onchange="S.proxyProtocol=this.value"><option value="http">HTTP</option><option value="socks5">SOCKS5</option></select></div><button class="btn secondary" onclick="qs('#hostPortFile').click()">选择 TXT 文件</button><input id="hostPortFile" type="file" accept=".txt,text/plain" hidden onchange="loadHostPortFile(this.files?.[0])"></div>`:''}<div class="field"><label for="importContent">${esc(importInputLabel())}</label><textarea id="importContent" placeholder="${esc(importPlaceholder())}" oninput="S.importText=this.value"></textarea></div>${S.importKind==='sub_url'?`<details class="advanced"><summary>拉取选项（可选）</summary>
+      <div class="settings-form">
+        <div class="field"><label for="importUserAgent">客户端 UA</label><input id="importUserAgent" value="${esc(S.importUserAgent||'')}" placeholder="留空自动尝试常见客户端（clash / v2rayNG / Shadowrocket）"></div>
+        <div class="field"><label for="importHeaders">额外请求头（每行 Key: Value）</label><textarea id="importHeaders" rows="2" placeholder="Referer: https://example.com">${esc((S.importHeaderText||''))}</textarea></div>
+      </div>
+      <p class="muted">机场只允许特定客户端时会返回错误页；留空时系统会自动换 UA 重试，并记住能成功的那个。</p>
+    </details>`:''}`;
 }
 async function loadHostPortFile(file){if(!file)return;S.importText=await file.text();renderImport()}
 function importPayload(){
@@ -101,7 +107,18 @@ function importPayload(){
   S.importText=qs('#importContent')?.value||'';
   S.chainProfileID=qs('#importChain')?.value||'';
   if(S.chainProfileID)localStorage.setItem(IMPORT_CHAIN_PROFILE_KEY,S.chainProfileID);else localStorage.removeItem(IMPORT_CHAIN_PROFILE_KEY);
+  S.importUserAgent=(qs('#importUserAgent')?.value||'').trim();
+  S.importHeaderText=qs('#importHeaders')?.value||'';
   const body={mode:S.importKind==='sub_url'?'url':'content',tag_prefix:S.tagPrefix,chain_profile_id:S.chainProfileID||''};
+  if(S.importUserAgent)body.user_agent=S.importUserAgent;
+  const headers={};
+  for(const line of S.importHeaderText.split('\n')){
+    const idx=line.indexOf(':');
+    if(idx<=0)continue;
+    const key=line.slice(0,idx).trim(),value=line.slice(idx+1).trim();
+    if(key&&value)headers[key]=value;
+  }
+  if(Object.keys(headers).length)body.headers=headers;
   if(S.importKind==='host_port'){body.content_format='host_port';body.proxy_protocol=S.proxyProtocol||'http'}
   if(body.mode==='url')body.url=S.importText.trim();else body.content=S.importText.trim();
   return body;

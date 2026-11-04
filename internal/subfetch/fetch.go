@@ -27,13 +27,35 @@ func (e *HTTPStatusError) Retryable() bool {
 	return e.Code == http.StatusRequestTimeout || e.Code == http.StatusTooManyRequests || e.Code >= 500
 }
 
+// Result is a fetched subscription plus the metadata needed to interpret it
+// (traffic quota headers, the URL after redirects).
+type Result struct {
+	Body     []byte
+	Header   http.Header
+	FinalURL string
+}
+
 type Options struct {
 	Timeout       time.Duration
 	SkipTLSVerify bool
+	// UserAgent overrides the default client string. Many providers only serve
+	// real content to known clients and return an error page otherwise.
+	UserAgent string
+	// Headers are applied on top of the defaults (Referer, Authorization, ...).
+	Headers       map[string]string
 	ProxyFallback func(context.Context, string, http.Header) ([]byte, error)
 }
 
 func Fetch(ctx context.Context, rawURL string, opts Options) ([]byte, error) {
+	result, err := FetchWithMeta(ctx, rawURL, opts)
+	if err != nil {
+		return nil, err
+	}
+	return result.Body, nil
+}
+
+// FetchWithMeta mirrors Fetch but keeps the response headers and final URL.
+func FetchWithMeta(ctx context.Context, rawURL string, opts Options) (Result, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -41,30 +63,30 @@ func Fetch(ctx context.Context, rawURL string, opts Options) ([]byte, error) {
 		opts.Timeout = 30 * time.Second
 	}
 	if err := validateURL(rawURL); err != nil {
-		return nil, err
+		return Result{}, err
 	}
 
-	headers := defaultHeaders()
+	headers := buildHeaders(opts)
 	client := newHTTPClient(opts.Timeout, opts.SkipTLSVerify, nil)
 	if transport, ok := client.Transport.(*http.Transport); ok {
 		defer transport.CloseIdleConnections()
 	}
-	body, err := fetchDirect(ctx, rawURL, headers, client)
+	result, err := fetchDirect(ctx, rawURL, headers, client)
 	if err == nil {
-		return body, nil
+		return result, nil
 	}
 	if !isRetryable(err) || opts.ProxyFallback == nil || ctx.Err() != nil {
-		return nil, sanitizeError(err, rawURL)
+		return Result{}, sanitizeError(err, rawURL)
 	}
 
 	body, fallbackErr := opts.ProxyFallback(ctx, rawURL, headers)
 	if fallbackErr == nil {
 		if len(body) > maxBodySize {
-			return nil, ErrBodyTooLarge
+			return Result{}, ErrBodyTooLarge
 		}
-		return body, nil
+		return Result{Body: body}, nil
 	}
-	return nil, fmt.Errorf("subscription fetch failed: direct: %s; fallback: %s", sanitizeError(err, rawURL), sanitizeError(fallbackErr, rawURL))
+	return Result{}, fmt.Errorf("subscription fetch failed: direct: %s; fallback: %s", sanitizeError(err, rawURL), sanitizeError(fallbackErr, rawURL))
 }
 
 func validateURL(rawURL string) error {
@@ -83,15 +105,32 @@ func validateURL(rawURL string) error {
 
 func defaultHeaders() http.Header {
 	h := make(http.Header)
-	h.Set("User-Agent", "easy_proxies/2.1")
+	h.Set("User-Agent", DefaultUserAgent)
 	h.Set("Accept", "*/*")
 	return h
 }
 
-func fetchDirect(ctx context.Context, rawURL string, headers http.Header, client *http.Client) ([]byte, error) {
+// DefaultUserAgent is used when a source does not configure one.
+const DefaultUserAgent = "easy_proxies/2.1"
+
+func buildHeaders(opts Options) http.Header {
+	headers := defaultHeaders()
+	if agent := strings.TrimSpace(opts.UserAgent); agent != "" {
+		headers.Set("User-Agent", agent)
+	}
+	for key, value := range opts.Headers {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		headers.Set(key, value)
+	}
+	return headers
+}
+
+func fetchDirect(ctx context.Context, rawURL string, headers http.Header, client *http.Client) (Result, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 	req.Header = headers.Clone()
 	return doRequest(client, req)
@@ -139,26 +178,31 @@ func serverName(target *dialTarget) string {
 	return target.ServerName
 }
 
-func doRequest(client *http.Client, req *http.Request) ([]byte, error) {
+func doRequest(client *http.Client, req *http.Request) (Result, error) {
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 	defer resp.Body.Close()
+	header := resp.Header.Clone()
+	finalURL := ""
+	if resp.Request != nil && resp.Request.URL != nil {
+		finalURL = resp.Request.URL.String()
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil, &HTTPStatusError{Code: resp.StatusCode}
+		return Result{}, &HTTPStatusError{Code: resp.StatusCode}
 	}
 
 	limited := io.LimitReader(resp.Body, maxBodySize+1)
 	body, err := io.ReadAll(limited)
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 	if len(body) > maxBodySize {
-		return nil, ErrBodyTooLarge
+		return Result{}, ErrBodyTooLarge
 	}
-	return body, nil
+	return Result{Body: body, Header: header, FinalURL: finalURL}, nil
 }
 
 func isRetryable(err error) bool {
