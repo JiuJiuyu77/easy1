@@ -2,6 +2,8 @@
 
 本仓库镜像：`ghcr.io/jiujiuyu77/easy1`（由 `.github/workflows/docker-publish.yml` 构建，`linux/amd64` + `linux/arm64`）。
 
+> 宝塔面板（Baota/aaPanel）用户请看 **[宝塔部署教程](./DEPLOY-BAOTA.md)**，里面有反代、HTTPS、目录属主和 GHCR 拉取的处理。
+
 ## 1. 选择镜像 tag
 
 | tag | 说明 |

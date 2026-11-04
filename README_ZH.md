@@ -48,7 +48,7 @@ Easy Proxies 是一个基于 sing-box 的代理池管理工具。
 
 ## 快速开始
 
-> 部署方式（compose / docker run / 源码）、端口与数据目录说明、升级回滚与排障，见 **[部署指南](./docs/DEPLOY.md)**。
+> 部署方式（compose / docker run / 源码）、端口与数据目录说明、升级回滚与排障，见 **[部署指南](./docs/DEPLOY.md)**；宝塔面板用户见 **[宝塔部署教程](./docs/DEPLOY-BAOTA.md)**。
 
 ### 1）准备配置
 
