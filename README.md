@@ -23,6 +23,8 @@
 
 ## Quick Start
 
+> Deployment options (compose / docker run / from source), ports, the data directory, upgrades and troubleshooting: **[Deployment guide](./docs/DEPLOY.md)** (Chinese).
+
 ### 1. Prepare Configuration
 
 ```bash
@@ -44,7 +46,7 @@ docker run --user $(id -u):$(id -g) \
   -v $(pwd)/data:/etc/easy_proxies \
   -v $(pwd)/logs:/app/logs \
   --network host \
-  ghcr.io/jasonwong1991/easy_proxies:latest
+  ghcr.io/jiujiuyu77/easy1:latest
 ```
 
 Or use docker compose:
@@ -385,7 +387,7 @@ The default setup uses host networking (recommended for automatic port managemen
 ```yaml
 services:
   easy_proxies:
-    image: ghcr.io/jasonwong1991/easy_proxies:latest
+    image: ${EASY_PROXIES_IMAGE:-ghcr.io/jiujiuyu77/easy1:latest}
     container_name: easy_proxies
     restart: unless-stopped
     network_mode: host
@@ -493,7 +495,7 @@ docker run --user $(id -u):$(id -g) \
   -v $(pwd)/data:/etc/easy_proxies \
   -v $(pwd)/logs:/app/logs \
   --network host \
-  ghcr.io/jasonwong1991/easy_proxies:latest
+  ghcr.io/jiujiuyu77/easy1:latest
 ```
 
 ### Other Common Issues

@@ -48,6 +48,8 @@ Easy Proxies 是一个基于 sing-box 的代理池管理工具。
 
 ## 快速开始
 
+> 部署方式（compose / docker run / 源码）、端口与数据目录说明、升级回滚与排障，见 **[部署指南](./docs/DEPLOY.md)**。
+
 ### 1）准备配置
 
 ```bash
@@ -426,7 +428,7 @@ docker run --user $(id -u):$(id -g) \
   -v $(pwd)/data:/etc/easy_proxies \
   -v $(pwd)/logs:/app/logs \
   --network host \
-  ghcr.io/jasonwong1991/easy_proxies:latest
+  ghcr.io/jiujiuyu77/easy1:latest
 ```
 
 ### 其他常见问题
