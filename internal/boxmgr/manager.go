@@ -115,10 +115,33 @@ func New(cfg *config.Config, monitorCfg monitor.Config, opts ...Option) *Manager
 	return m
 }
 
+// adoptConfigLocked publishes a configuration into the manager. The monitor
+// server keeps a pointer to the same *config.Config, so the copy must be written
+// in place: replacing the pointer would leave the WebUI (and therefore the next
+// save) editing a different object than the runtime uses.
+func (m *Manager) adoptConfigLocked(next *config.Config) {
+	if next == nil {
+		return
+	}
+	if m.cfg != nil {
+		*m.cfg = *next
+		return
+	}
+	m.cfg = next
+}
+
 // Start creates and starts the initial sing-box instance.
 func (m *Manager) Start(ctx context.Context) (err error) {
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
+	return m.startLocked(ctx, true)
+}
+
+// startLocked starts the core with the caller already holding lifecycleMu, so a
+// reload can boot a runtime that was never started (fresh install that got its
+// first nodes through the WebUI). waitHealth=false returns as soon as the
+// listeners are up: booting from a save request must not block on probes.
+func (m *Manager) startLocked(ctx context.Context, waitHealth bool) (err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -208,7 +231,9 @@ func (m *Manager) Start(ctx context.Context) (err error) {
 		if timeout <= 0 {
 			timeout = defaultHealthCheckTimeout
 		}
-		if healthErr := m.waitForHealthCheck(ctx, timeout); healthErr != nil {
+		if !waitHealth {
+			m.logger.Infof("skipping the blocking initial health check; probes continue in the background")
+		} else if healthErr := m.waitForHealthCheck(ctx, timeout); healthErr != nil {
 			if err = ctx.Err(); err != nil {
 				return err
 			}
@@ -254,7 +279,9 @@ func (m *Manager) reloadLocked(newCfg *config.Config) error {
 		return ctx.Err()
 	}
 	oldBox := m.currentBox
-	oldCfg := m.cfg
+	// Snapshot, not the shared pointer: adoptConfigLocked rewrites m.cfg in
+	// place, so a pointer would make the rollback target the new config.
+	oldCfg := m.copyConfigLocked()
 	m.currentBox = nil // Mark as reloading
 	m.mu.Unlock()
 
@@ -369,7 +396,7 @@ func (m *Manager) reloadLocked(newCfg *config.Config) error {
 	m.mu.Lock()
 	m.applyConfigSettings(newCfg)
 	m.currentBox = instance
-	m.cfg = newCfg
+	m.adoptConfigLocked(newCfg)
 	m.mu.Unlock()
 
 	// Sync config to monitor server so future WebUI settings changes target the current config pointer
@@ -446,7 +473,7 @@ func (m *Manager) rollbackToOldConfig(ctx context.Context, oldCfg *config.Config
 	}
 	m.mu.Lock()
 	m.currentBox = instance
-	m.cfg = oldCfg
+	m.adoptConfigLocked(oldCfg)
 	m.mu.Unlock()
 	// Sync config pointer to monitor server after rollback
 	if m.monitorServer != nil {
@@ -1074,6 +1101,36 @@ func (m *Manager) reloadWithPortMapLocked(newCfg *config.Config, portMap map[str
 	// all ports fresh"), since createNewConfig no longer pre-assigns them.
 	if err := newCfg.NormalizeWithPortMap(portMap); err != nil {
 		return fmt.Errorf("normalize config with port map: %w", err)
+	}
+
+	// A fresh install has no pool nodes yet, so the core was never started.
+	// Adopt the configuration (it is already normalized above) instead of
+	// failing the save with "manager not started": the next start uses it.
+	m.mu.RLock()
+	neverStarted := m.baseCtx == nil && m.currentBox == nil && !m.closed
+	m.mu.RUnlock()
+	if neverStarted {
+		m.mu.Lock()
+		if m.baseCtx == nil && m.currentBox == nil && !m.closed {
+			m.applyConfigSettings(newCfg)
+			m.adoptConfigLocked(newCfg)
+			m.storePortIndexLocked()
+			hasNodes := len(newCfg.Nodes) > 0
+			m.mu.Unlock()
+			if err := newCfg.SaveNodePortMap(); err != nil {
+				m.logger.Warnf("failed to persist node ports: %v", err)
+			}
+			if !hasNodes {
+				return nil
+			}
+			// First real configuration: boot the core now, otherwise every node
+			// imported through the WebUI would stay unserved until a restart.
+			if err := m.startLocked(context.Background(), false); err != nil {
+				return fmt.Errorf("start runtime for the new configuration: %w", err)
+			}
+			return nil
+		}
+		m.mu.Unlock()
 	}
 
 	if err := m.reloadLocked(newCfg); err != nil {

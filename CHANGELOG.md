@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Every save hung or failed while the process ran**: `AcquireInstanceLock` used `<config>.lock`, the same sidecar the persistence layer flocks per write. The instance lock is held for the whole lifetime, so any settings/node/chain save waited on it until it timed out. The instance lock now uses `<config>.instance.lock`.
+- **A runtime that started empty never served imported nodes**: with no pool nodes at boot the core is not started, and the first save/reload returned `manager not started`. It now boots the core from that reload (without blocking on the initial health check) once nodes exist.
+- **Saved settings never reached the runtime**: a reload replaced the manager's `*config.Config` instead of updating the shared object, so the WebUI kept editing a detached copy — mode, ports and pool policy changes appeared saved but had no effect, and `node_ports.json` was never written. The manager now adopts configs in place and rollback uses a snapshot.
 - Config writes no longer wait forever: the persistence lock now has a 10-second budget for both the in-process mutex and the on-disk lock, so a stuck writer surfaces as a readable error (and a timeout in the WebUI) instead of a request that never answers.
 - A read-only `config.yaml.lock` (read-only mount, or a mode set by hand) no longer fails every save: writes fall back to the destination inode lock instead of reporting `open existing persistence lock`.
 

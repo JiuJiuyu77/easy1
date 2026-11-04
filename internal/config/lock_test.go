@@ -113,3 +113,29 @@ func TestHeldLockReturnsErrorInsteadOfBlockingForever(t *testing.T) {
 		t.Fatalf("unexpected error: %v", saveErr)
 	}
 }
+
+// The instance lock is held for the whole process lifetime. It must not share
+// the persistence sidecar name, or every save waits on it until it times out.
+func TestInstanceLockDoesNotBlockConfigSaves(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newLockTestConfig(t, dir)
+
+	release, err := AcquireInstanceLock(cfg.filePath, 0)
+	if err != nil {
+		t.Fatalf("acquire instance lock: %v", err)
+	}
+	defer release()
+
+	started := time.Now()
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("save while the instance lock is held: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("save waited %s: the instance lock is probably sharing the sidecar name", elapsed)
+	}
+
+	// A second instance must still be rejected while the first holds the lock.
+	if _, err := AcquireInstanceLock(cfg.filePath, 200*time.Millisecond); err == nil {
+		t.Fatal("second instance lock acquisition should fail")
+	}
+}
