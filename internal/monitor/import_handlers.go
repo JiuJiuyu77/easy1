@@ -91,6 +91,13 @@ func (s *Server) handleChainProfiles(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]string{"error": "请求格式错误"})
 			return
 		}
+		// Repair pasted hop URIs (percent-encoded base64, stray whitespace,
+		// client-specific suffixes) before they are validated and stored.
+		for i := range req.Profiles {
+			for j := range req.Profiles[i].Hops {
+				req.Profiles[i].Hops[j].URI = proxychain.NormalizeNodeURI(req.Profiles[i].Hops[j].URI)
+			}
+		}
 		profiles, err := proxychain.NormalizeProfiles(req.Profiles)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)

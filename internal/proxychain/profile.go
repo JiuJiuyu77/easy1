@@ -50,6 +50,10 @@ func NormalizeProfile(profile Profile) (Profile, error) {
 	}
 	seen := make(map[string]struct{}, len(profile.Hops))
 	for index := range profile.Hops {
+		// Repair pasted URIs first (percent-encoded base64, stray whitespace,
+		// client specific suffixes) so validation sees the same shape the
+		// builder will dial.
+		profile.Hops[index].URI = NormalizeNodeURI(profile.Hops[index].URI)
 		profile.Hops[index].URI = strings.TrimSpace(profile.Hops[index].URI)
 		if profile.Hops[index].URI == "" {
 			return Profile{}, fmt.Errorf("hop %d URI is empty", index+1)

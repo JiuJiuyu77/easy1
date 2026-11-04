@@ -89,8 +89,8 @@ function setChainEditorBusy(busy,action=''){
 }
 async function testChainProfileDraft(){
   const profile=chainProfileDraft(),error=validateChainProfileDraft(profile);if(error){setChainEditorStatus(error,'bad');return false}
-  setChainEditorBusy(true,'test');setChainEditorStatus('正在建立前置代理连接...');
-  try{const result=await api('/api/chain-profiles/test',{method:'POST',body:JSON.stringify({profile})});setChainEditorStatus(`连接成功，延迟 ${result.latency_ms||0} ms`,'good');return true}catch(err){setChainEditorStatus(err.message,'bad');return false}finally{setChainEditorBusy(false)}
+  setChainEditorBusy(true,'test');setChainEditorStatus('正在通过 GitHub 检测前置代理...');
+  try{const result=await api('/api/chain-profiles/test',{method:'POST',body:JSON.stringify({profile})});setChainEditorStatus(`前置代理可用（GitHub 可达），延迟 ${result.latency_ms||0} ms`,'good');return true}catch(err){setChainEditorStatus(err.message,'bad');return false}finally{setChainEditorBusy(false)}
 }
 async function saveChainProfileDraft(){
   const id=qs('#chainEditID')?.value||'',name=qs('#chainEditName')?.value.trim()||'',uri=qs('#chainEditURI')?.value.trim()||'';
@@ -124,7 +124,7 @@ async function deleteChainProfile(id){
 }
 async function testChainProfile(id){
   const button=document.querySelector(`[data-chain-test="${CSS.escape(id)}"]`),old=button?.textContent;if(button){button.disabled=true;button.textContent='测试中'}
-  try{const result=await api('/api/chain-profiles/test',{method:'POST',body:JSON.stringify({id})});toast(`前置代理可用，延迟 ${result.latency_ms||0} ms`)}catch(err){toast(err.message,'err')}finally{if(button){button.disabled=false;button.textContent=old}}
+  try{const result=await api('/api/chain-profiles/test',{method:'POST',body:JSON.stringify({id})});toast(`前置代理可用（GitHub 可达），延迟 ${result.latency_ms||0} ms`)}catch(err){toast(err.message,'err')}finally{if(button){button.disabled=false;button.textContent=old}}
 }
 function chainProfilesHTML(){
   if(!S.chainProfiles.length)return '<div class="connectivity-idle"><span>尚未配置前置代理</span><button class="btn small secondary" onclick="openChainProfileEditor(\'\', \'settings\')">添加前置代理</button></div>';

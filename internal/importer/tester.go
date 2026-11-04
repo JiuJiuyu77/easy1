@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -448,6 +449,44 @@ func (t *NodeTester) newProbeSession(ctx context.Context, node ManagedNode, time
 	return &httpProbeSession{tester: t, client: client, close: closeClient}, nil
 }
 
+// chainProbeURL is what a chain profile is validated against. GitHub is used
+// instead of a generate_204 endpoint: reaching a tiny 204 proves very little
+// about a relay chain, while GitHub exercises DNS, TCP, TLS and a real page —
+// the same target the import page offers as a site check.
+const chainProbeURL = "https://github.com/"
+
+// probeChainTarget fetches target through the given client (which dials through
+// the chain) and requires a 2xx page carrying the github marker.
+func probeChainPage(ctx context.Context, client *http.Client, target string) error {
+	if strings.TrimSpace(target) == "" {
+		target = chainProbeURL
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; easy_proxies chain probe)")
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("GitHub 前置探测失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("GitHub 前置探测返回 HTTP %d（期望 2xx）", resp.StatusCode)
+	}
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
+	if len(body) == 0 {
+		if readErr != nil {
+			return fmt.Errorf("读取 GitHub 响应失败: %w", readErr)
+		}
+		return errors.New("GitHub 前置探测返回了空响应")
+	}
+	if !bytes.Contains(bytes.ToLower(body), []byte("github")) {
+		return errors.New("GitHub 前置探测拿到的页面不含 github 标记：可能被劫持或返回了错误页")
+	}
+	return nil
+}
+
 func (t *NodeTester) TestChainProfile(ctx context.Context, profile proxychain.Profile) TestResult {
 	if t.buildChainOutbounds == nil {
 		return TestResult{Error: fmt.Errorf("chain outbound builder is not configured")}
@@ -476,7 +515,11 @@ func (t *NodeTester) TestChainProfile(ctx context.Context, profile proxychain.Pr
 	session := newDirectProbeSession(t, outbound, t.timeout)
 	session.cleanup = cleanup
 	defer session.Close()
-	return session.Probe(ctx, t.probeTarget)
+	start := time.Now()
+	if err := probeChainPage(ctx, session.client, chainProbeURL); err != nil {
+		return TestResult{Error: err}
+	}
+	return TestResult{LatencyMs: time.Since(start).Milliseconds()}
 }
 
 func (t *NodeTester) FetchViaChain(ctx context.Context, profile proxychain.Profile, rawURL string, headers http.Header, timeout time.Duration) ([]byte, error) {

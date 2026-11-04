@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- 前置代理的"测试连接"改为**经该链访问 GitHub**（`https://github.com/`，要求 2xx 且页面含 github 标记），与节点导入里的站点检测口径一致；此前用 generate_204 只能证明通了一个 204，无法说明链能承载真实流量。
+
 ### Fixed
+- **前置代理无法解码 Base64**：粘贴的 vmess/ss URI 现在会先做归一化——还原 `%2B`/`%2F`/`%3D` 等 URL 编码、去掉换行与零宽字符、剥离客户端追加的 `?remarks=…` 后缀；归一化在校验、保存、拨号三处统一生效，配置里落盘的也是解码后的干净 URI。
 - **Every save hung or failed while the process ran**: `AcquireInstanceLock` used `<config>.lock`, the same sidecar the persistence layer flocks per write. The instance lock is held for the whole lifetime, so any settings/node/chain save waited on it until it timed out. The instance lock now uses `<config>.instance.lock`.
 - **A runtime that started empty never served imported nodes**: with no pool nodes at boot the core is not started, and the first save/reload returned `manager not started`. It now boots the core from that reload (without blocking on the initial health check) once nodes exist.
 - **Saved settings never reached the runtime**: a reload replaced the manager's `*config.Config` instead of updating the shared object, so the WebUI kept editing a detached copy — mode, ports and pool policy changes appeared saved but had no effect, and `node_ports.json` was never written. The manager now adopts configs in place and rollback uses a snapshot.

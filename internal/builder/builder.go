@@ -550,6 +550,10 @@ func buildStickyInbound(cfg *config.Config) (option.Inbound, error) {
 }
 
 func buildNodeOutbound(tag, rawURI string, skipCertVerify bool) (option.Outbound, error) {
+	// Repair pasted URIs (percent-encoded base64, stray whitespace, client
+	// specific suffixes) before any parsing; both the pool and the chain hop
+	// path go through here.
+	rawURI = proxychain.NormalizeNodeURI(rawURI)
 	if isShadowsocksURI(rawURI) {
 		opts, err := buildShadowsocksOptions(rawURI)
 		if err != nil {
@@ -1075,7 +1079,9 @@ func buildVMessOptions(rawURI string, skipCertVerify bool) (option.VMessOutbound
 	if strings.Contains(encoded, "@") {
 		return buildVMessOptionsFromURL(rawURI, skipCertVerify)
 	}
-	if index := strings.Index(encoded, "#"); index != -1 {
+	// Some clients glue their own parameters onto the base64 body
+	// (vmess://<b64>?remarks=...); only the payload is base64.
+	if index := strings.IndexAny(encoded, "?#"); index != -1 {
 		encoded = encoded[:index]
 	}
 
@@ -1089,7 +1095,7 @@ func buildVMessOptions(rawURI string, skipCertVerify bool) (option.VMessOutbound
 		}
 	}
 	if decodeErr != nil {
-		return option.VMessOutboundOptions{}, errors.New("invalid VMess base64 payload")
+		return option.VMessOutboundOptions{}, errors.New("invalid VMess base64 payload：base64 无法解码，请确认只粘贴 vmess:// 后的 base64 本体（不要带 ? 参数，浏览器复制可能带 %2B/%2F 编码）")
 	}
 
 	var vmess vmessJSON

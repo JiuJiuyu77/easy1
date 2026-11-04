@@ -147,6 +147,10 @@ nodes:
 | `peer=`、`remarks=`、`tls=1`、`xtls=2`、`tfo`、`udp` | 这些是客户端私有参数，不是标准 VLESS 参数 | 名称用 `#备注`；TLS 用 `security=tls|reality`；服务器名用 `sni=`；其余可删 |
 | reality 节点报 `requires public_key (pbk)` | 少了 `pbk` | 补 `security=reality&pbk=<base64 32字节>&sid=<短ID>` |
 
+> 「测试连接」是**经这条链访问 GitHub**（`https://github.com/`），需要 2xx 且页面正常，所以它验证的是真实可用性；如果服务器访问不了 GitHub，请先确认出口网络。
+>
+> 粘贴的 URI 会自动修：URL 编码（`%2B`/`%2F`/`%3D`）、换行/零宽字符、客户端追加的 `?remarks=…` 都会被还原成可用的 base64。
+
 一个可用的 reality 例子：
 
 ```
