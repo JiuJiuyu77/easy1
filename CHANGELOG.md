@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Config writes no longer wait forever: the persistence lock now has a 10-second budget for both the in-process mutex and the on-disk lock, so a stuck writer surfaces as a readable error (and a timeout in the WebUI) instead of a request that never answers.
+- A read-only `config.yaml.lock` (read-only mount, or a mode set by hand) no longer fails every save: writes fall back to the destination inode lock instead of reporting `open existing persistence lock`.
+
 ### Added
 - **前置代理（链式路由）**: `chain_profiles` in `config.yaml` describes up to 8 hops; a node references one with `chain_profile_id` and sing-box dials it through the generated detour chain. Exposed in the WebUI (导入节点/设置 页) with `/api/chain-profiles` and `/api/chain-profiles/test`, and every route change re-tests before it is applied. Chained nodes keep a separate port/identity per chain (`NodeKey` includes the profile id), and hop URIs may not point back at this instance's own listener ports.
 - **New multi-page WebUI** (dashboard, import, pool, candidates, failed, bulk tools, site connectivity, ports, logs, settings) served from `internal/monitor/assets` and backed by the new endpoints `/api/ui/*`, `/api/import/*`, `/api/connectivity/*`, `/api/ports/status`, `/api/managed-nodes/*`, `/api/nodes/{all,pool,failed,order}`, `/api/job-events` (SSE).

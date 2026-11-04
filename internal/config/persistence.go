@@ -8,11 +8,50 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 var pathLocks sync.Map
+
+// A save must never hang forever: an unreleased lock turns into a readable
+// error instead of an HTTP request that never answers (which the UI shows as a
+// blank page). 10s is far beyond any healthy write of a few MB of YAML.
+const (
+	persistenceLockWait  = 10 * time.Second
+	persistenceLockRetry = 20 * time.Millisecond
+)
+
+func acquirePathMutex(mutex *sync.Mutex, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if mutex.TryLock() {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("保存等待超时（%s）：上一个写配置操作仍未完成", timeout)
+		}
+		time.Sleep(persistenceLockRetry)
+	}
+}
+
+func lockFileWithTimeout(file *os.File, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		locked, err := tryLockFile(file)
+		if err != nil {
+			return err
+		}
+		if locked {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("配置文件被其他进程占用超过 %s（%s）", timeout, filepath.Base(file.Name()))
+		}
+		time.Sleep(persistenceLockRetry)
+	}
+}
 
 func canonicalFilePath(path string) string {
 	if absolute, err := filepath.Abs(path); err == nil {
@@ -36,7 +75,9 @@ func withPathWriteLock(path string, action func(*lockedPath) error) error {
 	path = canonicalFilePath(path)
 	value, _ := pathLocks.LoadOrStore(path, new(sync.Mutex))
 	mutex := value.(*sync.Mutex)
-	mutex.Lock()
+	if err := acquirePathMutex(mutex, persistenceLockWait); err != nil {
+		return err
+	}
 	defer mutex.Unlock()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
@@ -44,15 +85,24 @@ func withPathWriteLock(path string, action func(*lockedPath) error) error {
 	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0600)
 	transaction := &lockedPath{path: path}
 	if err != nil {
-		if _, statErr := os.Stat(path + ".lock"); statErr == nil {
-			return fmt.Errorf("open existing persistence lock: %w", err)
+		switch {
+		case errors.Is(err, os.ErrPermission), errors.Is(err, syscall.EROFS):
+			// The sidecar exists but cannot be opened (read-only mount, or a mode
+			// someone set by hand). Keep writing: the destination inode lock
+			// below still serializes concurrent writers, and a truly read-only
+			// destination is rejected by lockedPath.write.
+			transaction.forceInPlace = true
+		default:
+			if _, statErr := os.Stat(path + ".lock"); statErr == nil {
+				return fmt.Errorf("open existing persistence lock: %w", err)
+			}
+			// File-mounted deployments can have a writable file in a read-only
+			// parent. Retain their supported in-place writes under the inode lock.
+			transaction.forceInPlace = true
 		}
-		// File-mounted deployments can have a writable file in a read-only
-		// parent. Retain their supported in-place writes under the inode lock.
-		transaction.forceInPlace = true
 	} else {
 		defer lock.Close()
-		if err := lockFile(lock); err != nil {
+		if err := lockFileWithTimeout(lock, persistenceLockWait); err != nil {
 			return fmt.Errorf("lock sidecar: %w", err)
 		}
 		defer unlockFile(lock)
@@ -67,7 +117,7 @@ func withPathWriteLock(path string, action func(*lockedPath) error) error {
 		if openErr != nil {
 			return fmt.Errorf("open destination: %w", openErr)
 		}
-		if err := lockFile(file); err != nil {
+		if err := lockFileWithTimeout(file, persistenceLockWait); err != nil {
 			file.Close()
 			return fmt.Errorf("lock destination: %w", err)
 		}
@@ -92,14 +142,16 @@ func readFileWithLock(path string) ([]byte, error) {
 	path = canonicalFilePath(path)
 	value, _ := pathLocks.LoadOrStore(path, new(sync.Mutex))
 	mutex := value.(*sync.Mutex)
-	mutex.Lock()
+	if err := acquirePathMutex(mutex, persistenceLockWait); err != nil {
+		return nil, err
+	}
 	defer mutex.Unlock()
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	if err := lockFile(file); err != nil {
+	if err := lockFileWithTimeout(file, persistenceLockWait); err != nil {
 		return nil, err
 	}
 	defer unlockFile(file)

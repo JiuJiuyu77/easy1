@@ -155,10 +155,26 @@ function latencyPill(n){
 function countryPill(n){return n.country_code?valuePill(countryLabel(n.country_code),'green'):valuePill('-','muted')}
 function portPill(n){return n.port?valuePill(n.port,'green'):valuePill('-','muted')}
 async function api(path,opt={}){
-  const headers={...(opt.headers||{})};
-  if(opt.body!==undefined && !(opt.body instanceof FormData)) headers['Content-Type']='application/json';
+  const {timeoutMs,...rest}=opt;
+  const method=String(rest.method||'GET').toUpperCase();
+  // Writes wait far longer than reads: a save may reload the runtime. A request
+  // that never answers is what makes the page look broken, so cap it and say so.
+  const limit=Number.isFinite(timeoutMs)?timeoutMs:(method==='GET'?30000:90000);
+  let controller=null,timer=null;
+  if(limit>0&&!rest.signal){controller=new AbortController();timer=setTimeout(()=>controller.abort(),limit)}
+  const headers={...(rest.headers||{})};
+  if(rest.body!==undefined && !(rest.body instanceof FormData)) headers['Content-Type']='application/json';
   if(S.token) headers.Authorization='Bearer '+S.token;
-  const res=await fetch(path,{...opt,headers});
+  let res;
+  try{
+    res=await fetch(path,{...rest,headers,...(controller?{signal:controller.signal}:{})});
+  }catch(err){
+    if(err&&err.name==='AbortError'){
+      const e=new Error(`请求超时（${Math.round(limit/1000)} 秒无响应）：服务端可能正在等待配置文件锁或重载运行时。稍后重试；若持续出现，在服务器执行 docker compose logs --tail=60 easy_proxies`);
+      e.status=0;throw e;
+    }
+    throw err;
+  }finally{if(timer)clearTimeout(timer)}
   const ct=res.headers.get('content-type')||'';
   let data=ct.includes('application/json')?await res.json().catch(()=>({})):await res.text();
   if(typeof data==='string'&&data.trim().startsWith('{')){try{data=JSON.parse(data)}catch(e){}}
