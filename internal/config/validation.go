@@ -12,6 +12,10 @@ func normalizePoolMode(mode string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "", "sequential", "round-robin", "round_robin":
 		return "sequential", nil
+	case "rotate":
+		// Legacy name for the same "walk the member list" scheduling used by
+		// the older management UI; keep accepting it so existing configs load.
+		return "sequential", nil
 	case "random":
 		return "random", nil
 	case "balance":

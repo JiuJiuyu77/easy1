@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"easy_proxies/internal/builder"
@@ -87,6 +88,11 @@ type Manager struct {
 	baseCancel         context.CancelFunc
 	closed             bool
 	healthCheckStarted bool
+
+	// portIndex caches node key → local port for the ports API, and
+	// startupTimings carries per-stage startup durations to the diagnostics API.
+	portIndex      atomic.Value // map[string]uint16
+	startupTimings atomic.Value // map[string]int64
 }
 
 // New creates a BoxManager with the given config.

@@ -83,6 +83,11 @@ type Manager struct {
 	lastSubHash      string
 	lastNodesModTime time.Time
 	lastNodesSize    int64
+
+	// sourceRefresher is set when the WebUI manages import sources; the worker
+	// then delegates each tick to the importer instead of loading every
+	// subscription node into the runtime (see source_refresh.go).
+	sourceRefresher SourceRefresher
 }
 
 func cloneConfig(cfg *config.Config) *config.Config {
@@ -405,6 +410,24 @@ func (m *Manager) refreshLoop() {
 // cache write rolls back the runtime as well; rollback errors are reported.
 func (m *Manager) doRefresh(cfg *config.Config, version uint64) error {
 	m.logger.Infof("starting subscription refresh")
+	// Managed import sources own fetching, testing and pool promotion: drive
+	// that job and mirror its outcome instead of replacing the node set.
+	if handled, err := m.refreshManagedSources(m.ctx); handled {
+		m.mu.Lock()
+		m.status.LastRefresh = time.Now()
+		if err != nil {
+			m.status.LastError = err.Error()
+		} else {
+			m.status.LastError = ""
+		}
+		m.mu.Unlock()
+		if err != nil {
+			m.logger.Errorf("managed source refresh failed: %v", err)
+			return err
+		}
+		m.logger.Infof("managed source refresh completed")
+		return nil
+	}
 	var startingConfig *config.Config
 	if m.boxMgr != nil {
 		startingConfig = m.boxMgr.CurrentConfig()
@@ -492,7 +515,21 @@ func (m *Manager) doRefresh(cfg *config.Config, version uint64) error {
 }
 
 func sameSubscriptionConfig(a, b *config.Config) bool {
-	return a != nil && b != nil && slices.Equal(a.Subscriptions, b.Subscriptions) && a.SubscriptionRefresh == b.SubscriptionRefresh
+	if a == nil || b == nil {
+		return false
+	}
+	if !slices.Equal(a.Subscriptions, b.Subscriptions) {
+		return false
+	}
+	// SubscriptionRefreshConfig is not comparable: SiteTargets is a slice.
+	x, y := a.SubscriptionRefresh, b.SubscriptionRefresh
+	if x.Enabled != y.Enabled || x.Interval != y.Interval || x.Timeout != y.Timeout ||
+		x.HealthCheckTimeout != y.HealthCheckTimeout || x.DrainTimeout != y.DrainTimeout ||
+		x.MinAvailableNodes != y.MinAvailableNodes || x.FetchConcurrency != y.FetchConcurrency {
+		return false
+	}
+	x204, y204 := x.Test204Enabled(), y.Test204Enabled()
+	return x204 == y204 && slices.Equal(x.SiteTargets, y.SiteTargets)
 }
 
 // runtimeSubscriptionConfig must be called without holding runtime lifecycle

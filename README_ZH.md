@@ -6,6 +6,18 @@ Easy Proxies 是一个基于 sing-box 的代理池管理工具。
 
 目标是把大量上游节点统一成稳定的本地 HTTP/SOCKS5 代理入口，同时支持按节点独立端口访问。
 
+## 界面预览
+
+<img src="./images/webui-dashboard.png" width="960" alt="仪表盘">
+
+<details>
+<summary>更多截图</summary>
+<br>
+<img src="./images/webui-pool.png" width="960" alt="可用端口">
+<br><br>
+<img src="./images/webui-import.png" width="960" alt="导入节点">
+</details>
+
 ## 当前能力
 
 - 运行模式：`pool`、`multi-port`、`hybrid`。
@@ -18,6 +30,9 @@ Easy Proxies 是一个基于 sing-box 的代理池管理工具。
 - 拨号失败自动重试：节点拨号失败时自动切换到另一个健康节点重试（可配置次数）。
 - 端口稳定（multi-port/hybrid）：每个节点按 URI 稳定标识（忽略名称与参数顺序），订阅刷新或重启后保持同一本地端口（持久化到 config.yaml 同目录的 `node_ports.json`）。
 - 主端口会话路由：使用 `用户名.sessionID` 在多次连接间固定上游节点，节点失效时切换；普通用户名沿用原池调度。旧版按来源 IP 绑定的独立粘性端口继续兼容（仅 pool/hybrid 模式）。
+- **前置代理（链式路由）**：`chain_profiles` 配置最多 8 跳跳板，节点用 `chain_profile_id` 引用；修改后先重新检测再应用，链式节点按「上游 URI + 链」独立分配端口与会话身份。
+- **多页 Web 管理面板**：仪表盘 / 导入节点 / 可用端口 / 候选节点 / 失败节点 / 批量工具 / 站点检测 / 端口状态 / 日志 / 设置 / 会话路由，导入候选节点落库（`managed_nodes.json`），节点池是监听端口的唯一来源。
+- **本地与 WebDAV 备份**：`/api/backup/*`，带 schema 版本与校验和。
 - Web 管理面板 + API：
   - 代理接入快捷卡片、节点搜索/状态筛选、探测/导出
   - **会话路由页**：生成会话 ID、复制 HTTP/SOCKS5 URL 或 curl、查看绑定与重置会话；预览隐藏密码，复制的完整地址含真实认证信息

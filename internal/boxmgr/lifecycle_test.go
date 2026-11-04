@@ -364,7 +364,7 @@ func TestCurrentSubscriptionConfigIsNarrowIndependentSnapshot(t *testing.T) {
 	if snapshot.Nodes != nil || snapshot.Listener.Password != "" {
 		t.Fatal("worker snapshot included node or credential fields")
 	}
-	if snapshot.NodesFile != m.cfg.NodesFile || snapshot.FilePath() != m.cfg.FilePath() || snapshot.SubscriptionRefresh != m.cfg.SubscriptionRefresh || len(snapshot.Subscriptions) != 1 {
+	if snapshot.NodesFile != m.cfg.NodesFile || snapshot.FilePath() != m.cfg.FilePath() || !sameRefreshSettings(snapshot.SubscriptionRefresh, m.cfg.SubscriptionRefresh) || len(snapshot.Subscriptions) != 1 {
 		t.Fatalf("worker snapshot missed required fields: %+v", snapshot)
 	}
 	snapshot.Subscriptions[0] = "changed"
@@ -409,4 +409,13 @@ func BenchmarkCurrentSubscriptionConfig(b *testing.B) {
 			}
 		})
 	}
+}
+
+// sameRefreshSettings compares the subscription refresh block field by field:
+// SiteTargets makes the struct non-comparable.
+func sameRefreshSettings(a, b config.SubscriptionRefreshConfig) bool {
+	return a.Enabled == b.Enabled && a.Interval == b.Interval && a.Timeout == b.Timeout &&
+		a.HealthCheckTimeout == b.HealthCheckTimeout && a.DrainTimeout == b.DrainTimeout &&
+		a.MinAvailableNodes == b.MinAvailableNodes && a.FetchConcurrency == b.FetchConcurrency &&
+		a.Test204Enabled() == b.Test204Enabled() && len(a.SiteTargets) == len(b.SiteTargets)
 }

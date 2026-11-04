@@ -385,7 +385,7 @@ func TestSetConfigRespectsExplicitlyClearedSubscriptionsWithoutMutatingCaller(t 
 			if s.cfgSrc != next || !reflect.DeepEqual(*next, before) || !reflect.DeepEqual(*oldCfg, previous) {
 				t.Fatal("SetConfig mutated the new/previous caller configuration")
 			}
-			if len(s.cfgSrc.Subscriptions) != 0 || s.cfgSrc.SubscriptionRefresh != refresh {
+			if len(s.cfgSrc.Subscriptions) != 0 || !sameRefreshBlock(s.cfgSrc.SubscriptionRefresh, refresh) {
 				t.Fatal("SetConfig revived old subscription URLs or refresh settings")
 			}
 			w := proxyAPIRequest(t, s, http.MethodGet, "/api/subscription/config", "")
@@ -456,4 +456,21 @@ func TestSettingsDisabledGeoIPZeroIntervalRoundTrip(t *testing.T) {
 			}
 		})
 	}
+}
+
+// sameRefreshBlock compares the refresh settings field by field because
+// SiteTargets makes the struct non-comparable.
+func sameRefreshBlock(a, b config.SubscriptionRefreshConfig) bool {
+	if a.Enabled != b.Enabled || a.Interval != b.Interval || a.Timeout != b.Timeout ||
+		a.HealthCheckTimeout != b.HealthCheckTimeout || a.DrainTimeout != b.DrainTimeout ||
+		a.MinAvailableNodes != b.MinAvailableNodes || a.FetchConcurrency != b.FetchConcurrency ||
+		a.Test204Enabled() != b.Test204Enabled() || len(a.SiteTargets) != len(b.SiteTargets) {
+		return false
+	}
+	for i := range a.SiteTargets {
+		if a.SiteTargets[i] != b.SiteTargets[i] {
+			return false
+		}
+	}
+	return true
 }
