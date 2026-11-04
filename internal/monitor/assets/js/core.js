@@ -355,6 +355,10 @@ async function refresh(){
 	  await loadImportSummary(request);
 	  if(!isCurrentPageRequest(request))return;
 	  renderBulk();
+	}else if(S.page==='sessions'){
+	  await loadSessions(request);
+	  if(!isCurrentPageRequest(request))return;
+	  renderSessions();
 	}else if(S.page==='connectivity'){
 	  await loadConnectivityScopes(request);
 	  if(!isCurrentPageRequest(request))return;

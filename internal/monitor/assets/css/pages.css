@@ -269,3 +269,12 @@ pre.log-view{height:100%;max-height:none;background:#0f172a;color:#cbd5e1;border
   .result-metrics,.bulk-grid{grid-template-columns:1fr}
   .strip-item+.strip-item{border-left:0;padding-left:4px}
 }
+
+/* --- 会话路由页：绑定行 --- */
+.bind-list{display:grid;gap:8px}
+.bind-row{display:grid;grid-template-columns:minmax(120px,1.1fr) minmax(160px,1.6fr) minmax(110px,.9fr) minmax(110px,.9fr) auto;gap:12px;align-items:center;padding:11px 16px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
+.bind-row strong{font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bind-row .mono{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bind-row .muted{font-size:12.5px}
+.bind-head{padding:0 16px 4px;color:var(--muted);font-size:12px;font-weight:600}
+@media(max-width:760px){.bind-row{grid-template-columns:1fr auto;gap:6px}.bind-row .bind-meta{grid-column:1/-1}}

@@ -129,6 +129,10 @@ function renderSettings(){
   const probeTarget=allowedProbeTarget(s.probe_target);
   const blacklistSeconds=durationSeconds(pool.blacklist_duration,600);
   const rotationSeconds=durationSeconds(pool.rotation_interval,120);
+  const sticky=s.sticky||{};
+  const sessionEnabled=sticky.session_enabled!==false;
+  const sessionTTLHours=Math.max(1,Math.round(durationSeconds(sticky.session_ttl,86400)/3600));
+  const maxSessions=Number(sticky.max_sessions)||10000;
   const refreshing=S.refreshJob?.status==='running'||!!S.activeRefreshJob;
   const bindingRunning=S.tagBindingJob?.status==='running'||!!S.activeTagBindingJob;
   const bindingTags=[...new Set(sources.map(source=>String(source.tag_prefix||'').trim()).filter(Boolean))];
@@ -191,6 +195,26 @@ function renderSettings(){
             <div class="field"><label>轮换间隔（秒）</label><input id="setRotateInterval" type="number" min="1" step="1" value="${esc(rotationSeconds)}"></div>
           </div>
           <div class="settings-actions"><button class="btn primary" onclick="saveSettings()">保存运行设置并重载</button></div>
+        </div>
+      </section>
+
+      <section class="settings-section settings-wide">
+        <div class="settings-section-head">
+          <h2>会话路由与粘性</h2>
+          <span class="pill ${sessionEnabled?'green':''}">${sessionEnabled?'已启用':'已关闭'}</span>
+        </div>
+        <div class="settings-section-body">
+          <p class="muted">共享入口（pool / hybrid）用「用户名.sessionID」把同一会话固定到同一上游节点；下面的 TTL 按“最后一次成功拨号”计时，超过上限按最近最少使用淘汰。按来源 IP 的粘性端口是旧版入口，可独立启用。</p>
+          <label class="toggle-row"><input id="setSessionEnabled" type="checkbox" ${sessionEnabled?'checked':''} style="width:auto"><div><strong>启用命名会话路由</strong><span class="muted">关闭后只按普通用户名调度</span></div></label>
+          <div class="settings-form">
+            <div class="field"><label>会话空闲 TTL（小时）</label><input id="setSessionTTL" type="number" min="1" max="8760" value="${esc(sessionTTLHours)}"></div>
+            <div class="field"><label>最大会话数</label><input id="setMaxSessions" type="number" min="1" max="100000" value="${esc(maxSessions)}"></div>
+          </div>
+          <label class="toggle-row"><input id="setStickyEnabled" type="checkbox" ${sticky.enabled?'checked':''} style="width:auto"><div><strong>按来源 IP 粘连（旧版）</strong><span class="muted">pool / hybrid 模式下的独立粘性端口</span></div></label>
+          <div class="settings-form">
+            <div class="field"><label>粘性端口</label><input id="setStickyPort" type="number" min="0" max="65535" value="${esc(sticky.port||0)}" placeholder="0 表示自动使用 Pool 端口 + 1"></div>
+          </div>
+          <div class="settings-actions"><button class="btn secondary" onclick="saveSettings()">保存运行设置并重载</button></div>
         </div>
       </section>
 
@@ -375,6 +399,12 @@ function allowedProbeTarget(value){
 }
 async function saveSettings(){
   const current=S.settings||{},currentListener=current.listener||{},currentMulti=current.multi_port||{},currentMgmt=current.management||{},currentGeo=current.geoip||{};
+  const ttlHours=Number(qs('#setSessionTTL')?.value)||0;
+  if(ttlHours<1||ttlHours>8760){toast('会话 TTL 需在 1 到 8760 小时之间','err');return}
+  const maxSessions=Number(qs('#setMaxSessions')?.value)||0;
+  if(maxSessions<1||maxSessions>100000){toast('最大会话数需在 1 到 100000 之间','err');return}
+  const stickyPort=Number(qs('#setStickyPort')?.value)||0;
+  if(stickyPort<0||stickyPort>65535){toast('粘性端口需在 0 到 65535 之间','err');return}
   const body={
     mode:qs('#setMode').value,
     external_ip:qs('#setExternal').value.trim(),
@@ -384,6 +414,13 @@ async function saveSettings(){
     multi_port:{address:qs('#setMultiAddr').value.trim(),base_port:Number(qs('#setMultiPort').value)||0,username:qs('#setMultiUser').value,password:qs('#setMultiPass').value},
     pool:{mode:qs('#setPoolMode').value.trim()||'sequential',failure_threshold:Number(qs('#setFail').value)||2,blacklist_duration:secondsDuration(qs('#setBlacklist').value,600),rotation_interval:secondsDuration(qs('#setRotateInterval').value,120)},
     management:{listen:qs('#setMgmtListen').value.trim(),password:currentMgmt.password||''},
+    sticky:{
+      session_enabled:qs('#setSessionEnabled')?.checked!==false,
+      session_ttl:ttlHours+'h',
+      max_sessions:maxSessions,
+      enabled:!!qs('#setStickyEnabled')?.checked,
+      port:stickyPort
+    },
     geoip:{
       enabled:!!currentGeo.enabled,
       database_path:currentGeo.database_path||'',

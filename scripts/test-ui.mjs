@@ -48,6 +48,17 @@ test('every page in the router has a renderer defined', () => {
     const renderer = id === 'pool' || id === 'nodes' || id === 'failed' ? 'renderManaged' : `render${id[0].toUpperCase()}${id.slice(1)}`;
     assert.ok(new RegExp(`function ${renderer}\\(`).test(jsSource), `missing ${renderer} for page "${id}"`);
   }
+  // Every page except the import default needs its own branch in refresh();
+  // a nav entry without a branch silently renders the wrong page.
+  const sharedManaged = /\['nodes','pool','failed'\]\.includes\(S\.page\)/.test(jsSource);
+  for (const id of ids) {
+    if (id === 'import') continue;
+    if (['nodes', 'pool', 'failed'].includes(id)) {
+      assert.ok(sharedManaged, `page "${id}" has no managed refresh() branch`);
+      continue;
+    }
+    assert.ok(new RegExp(`S\\.page==='${id}'`).test(jsSource), `page "${id}" has no refresh() branch`);
+  }
   for (const loader of ['loadSessions', 'loadSettings', 'loadManaged', 'loadPorts']) {
     assert.ok(new RegExp(`(async )?function ${loader}\\(`).test(jsSource), `missing ${loader}`);
   }
@@ -79,4 +90,22 @@ test('session page keeps the management API contract', () => {
 test('pool mode matches backend sequential spelling', () => {
   assert.match(jsSource, /'sequential'|"sequential"/);
   assert.doesNotMatch(jsSource, /round-robin/);
+});
+test('settings page keeps the session/sticky contract', () => {
+  const settings = readFileSync(join(root, 'js/pages/settings.js'), 'utf8');
+  for (const id of ['setSessionEnabled', 'setSessionTTL', 'setMaxSessions', 'setStickyEnabled', 'setStickyPort']) {
+    assert.ok(settings.includes(`id="${id}"`), `missing control ${id}`);
+  }
+  // The PUT body must carry the sticky block the API expects.
+  assert.match(settings, /sticky:\{[\s\S]{0,220}session_enabled:/);
+  assert.match(settings, /session_ttl:\s*ttlHours\+'h'/);
+  assert.match(settings, /max_sessions:\s*maxSessions/);
+  // Guard rails must match the backend limits.
+  assert.match(settings, /ttlHours>8760/);
+  assert.match(settings, /maxSessions>100000/);
+});
+
+test('session page points at the settings toggle', () => {
+  const sessions = readFileSync(join(root, 'js/pages/sessions.js'), 'utf8');
+  assert.match(sessions, /请先在设置中开启会话路由/);
 });
