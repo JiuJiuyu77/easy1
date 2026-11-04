@@ -515,7 +515,21 @@ func (m *Manager) doRefresh(cfg *config.Config, version uint64) error {
 }
 
 func sameSubscriptionConfig(a, b *config.Config) bool {
-	return a != nil && b != nil && slices.Equal(a.Subscriptions, b.Subscriptions) && a.SubscriptionRefresh == b.SubscriptionRefresh
+	if a == nil || b == nil {
+		return false
+	}
+	if !slices.Equal(a.Subscriptions, b.Subscriptions) {
+		return false
+	}
+	// SubscriptionRefreshConfig is not comparable: SiteTargets is a slice.
+	x, y := a.SubscriptionRefresh, b.SubscriptionRefresh
+	if x.Enabled != y.Enabled || x.Interval != y.Interval || x.Timeout != y.Timeout ||
+		x.HealthCheckTimeout != y.HealthCheckTimeout || x.DrainTimeout != y.DrainTimeout ||
+		x.MinAvailableNodes != y.MinAvailableNodes || x.FetchConcurrency != y.FetchConcurrency {
+		return false
+	}
+	x204, y204 := x.Test204Enabled(), y.Test204Enabled()
+	return x204 == y204 && slices.Equal(x.SiteTargets, y.SiteTargets)
 }
 
 // runtimeSubscriptionConfig must be called without holding runtime lifecycle

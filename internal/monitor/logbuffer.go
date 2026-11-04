@@ -59,6 +59,14 @@ func (lb *LogBuffer) Content() string {
 	return string(content)
 }
 
+// Clear removes all buffered log content.
+func (lb *LogBuffer) Clear() {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	lb.start = 0
+	lb.count = 0
+}
+
 // SharedLogBuffer is the global log buffer accessible by the server.
 var SharedLogBuffer = NewLogBuffer(64 * 1024)
 
