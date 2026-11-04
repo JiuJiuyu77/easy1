@@ -109,3 +109,9 @@ test('session page points at the settings toggle', () => {
   const sessions = readFileSync(join(root, 'js/pages/sessions.js'), 'utf8');
   assert.match(sessions, /请先在设置中开启会话路由/);
 });
+test('a failed render surfaces the reason instead of a blank page', () => {
+  assert.match(jsSource, /function renderFatal\(/);
+  // refresh() must route non-abort failures into renderFatal, not just a toast.
+  assert.match(jsSource, /catch\(err\)\{\s*if\(isAbortError\(err\)\)return;\s*renderFatal\(err\)/);
+  assert.match(jsSource, /docker compose logs/);
+});

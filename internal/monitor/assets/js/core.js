@@ -327,6 +327,18 @@ function beginPageRequest(){
 }
 function isCurrentPageRequest(request){return !request||request.id===S.pageRequest}
 function isAbortError(err){return err?.name==='AbortError'}
+// renderFatal keeps a failed render readable instead of leaving a blank page:
+// previous behaviour only raised a toast, so a thrown API/render error looked
+// like a white screen with no way to tell what happened.
+function renderFatal(err){
+  const host=qs('#view');
+  if(!host)return;
+  const message=(err&&(err.message||err.error))||String(err||'未知错误');
+  host.innerHTML=`<div class="card"><div class="card-head"><div><h2>页面加载失败</h2><p class="muted">${esc(message)}</p></div></div>
+    <p class="muted">常见原因：刚保存的配置让运行时重载失败（端口被占用、运行模式与端口映射不匹配、GeoIP 数据库缺失），或某个接口返回了错误。</p>
+    <div class="settings-actions"><button class="btn secondary" type="button" onclick="refresh()">重试</button><button class="btn secondary" type="button" onclick="location.reload()">重新加载页面</button><button class="btn primary" type="button" onclick="go('dashboard')">返回仪表盘</button></div>
+    <p class="muted">如果仍失败，在服务器执行 <code>docker compose logs --tail=100 easy_proxies</code> 查看后端日志。</p></div>`;
+}
 async function refresh(){
   const request=beginPageRequest();
   try{
@@ -375,7 +387,11 @@ async function refresh(){
     renderNav();
     restoreActiveJobs();
     updateShellStatus().catch(()=>{});
-  }catch(err){if(!isAbortError(err))toast(err.message,'err')}
+  }catch(err){
+    if(isAbortError(err))return;
+    renderFatal(err);
+    toast(err.message,'err');
+  }
 }
 function managedScope(kind){return kind==='pool'?'pool':kind==='failed'?'failed':'candidate'}
 async function loadManaged(kind=S.page,request){
