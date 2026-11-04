@@ -10,7 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - 前置代理的"测试连接"改为**经该链访问 GitHub**（`https://github.com/`，要求 2xx 且页面含 github 标记），与节点导入里的站点检测口径一致；此前用 generate_204 只能证明通了一个 204，无法说明链能承载真实流量。
 
+### Added
+- **补齐上游面板能力到新 UI**：新增「诊断」页（每个节点的成功率/最后错误/时间线，支持立即探测、拉黑、解封）、仪表盘实时流量（`/api/traffic` SSE + 60 秒速率曲线）、入口链接一键复制（HTTP/SOCKS5/curl）、黑名单节点卡片；设置页补上池冷却（瞬时/429）、绑定节点失败即拉黑、探测并发、日志轮转与压缩。
+- **手机端适配**：新增 `mobile.css`，导航在窄屏压成一行横向滚动、卡片单列、表格横向滚动、表单与按钮全宽，设置区不再被挤成竖排。
+
 ### Fixed
+- **端口冲突**：节点端口分配器（新增节点、重建端口、排序）以前只避开其他节点占用的端口，可能把代理入口、管理 API、粘性入口、Clash 流量端口或 GeoIP 端口分给节点，绑定失败甚至顶掉 WebUI。现在两个分配路径都使用配置层的保留端口集合，并补了回归测试。
+- **`config.example.yaml` 顶层 `nodes` 键重复**：插入前置代理段落时误把 `#   min_available_nodes: 1` 截断，并遗留了一个顶层 `nodes: 1`，直接复制示例配置会得到重复键。
 - **前置代理无法解码 Base64**：粘贴的 vmess/ss URI 现在会先做归一化——还原 `%2B`/`%2F`/`%3D` 等 URL 编码、去掉换行与零宽字符、剥离客户端追加的 `?remarks=…` 后缀；归一化在校验、保存、拨号三处统一生效，配置里落盘的也是解码后的干净 URI。
 - **Every save hung or failed while the process ran**: `AcquireInstanceLock` used `<config>.lock`, the same sidecar the persistence layer flocks per write. The instance lock is held for the whole lifetime, so any settings/node/chain save waited on it until it timed out. The instance lock now uses `<config>.instance.lock`.
 - **A runtime that started empty never served imported nodes**: with no pool nodes at boot the core is not started, and the first save/reload returned `manager not started`. It now boots the core from that reload (without blocking on the initial health check) once nodes exist.

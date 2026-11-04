@@ -5,6 +5,13 @@ import (
 	"strconv"
 )
 
+// ReservedListenerPorts exposes the ports the process itself listens on
+// (proxy entry, sticky entry, management, Clash traffic controller, GeoIP) so
+// allocators outside this package never hand them to a node.
+func (c *Config) ReservedListenerPorts() map[uint16]bool {
+	return c.reservedListenerPorts()
+}
+
 func (c *Config) reservedListenerPorts() map[uint16]bool {
 	ports := make(map[uint16]bool)
 	if c.Mode == "pool" || c.Mode == "hybrid" {

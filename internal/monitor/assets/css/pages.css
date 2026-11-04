@@ -278,3 +278,28 @@ pre.log-view{height:100%;max-height:none;background:#0f172a;color:#cbd5e1;border
 .bind-row .muted{font-size:12.5px}
 .bind-head{padding:0 16px 4px;color:var(--muted);font-size:12px;font-weight:600}
 @media(max-width:760px){.bind-row{grid-template-columns:1fr auto;gap:6px}.bind-row .bind-meta{grid-column:1/-1}}
+
+/* --- 诊断页 / 仪表盘扩展 --- */
+.dash-extras{display:grid;grid-template-columns:1.1fr .9fr;gap:var(--gap)}
+.kv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px 14px}
+.kv-grid>div{display:grid;gap:2px}
+.kv-grid span{color:var(--muted);font-size:12px}
+.kv-grid strong{font-size:14px}
+.debug-list{overflow-x:auto}
+.debug-row{display:grid;grid-template-columns:minmax(110px,1.1fr) 84px 70px 96px minmax(140px,1.8fr) minmax(90px,130px) 132px;gap:10px;align-items:center;padding:9px 14px;border-bottom:1px solid var(--line);min-width:760px}
+.debug-row:last-child{border-bottom:0}
+.debug-row .table-head{display:none}
+.debug-error{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tl-strip{display:flex;gap:3px;align-items:center;flex-wrap:wrap}
+.tl-dot{width:7px;height:7px;border-radius:50%;background:var(--slate-soft);display:inline-block}
+.tl-dot.ok{background:var(--green,#16a34a)}
+.tl-dot.bad{background:var(--red,#dc2626)}
+.traffic-spark{margin-top:10px;height:72px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface-subtle);overflow:hidden}
+.traffic-spark svg{width:100%;height:100%;display:block}
+.traffic-spark .spark{fill:none;stroke-width:1.6;vector-effect:non-scaling-stroke}
+.traffic-spark .spark.up{stroke:#2563eb}
+.traffic-spark .spark.down{stroke:#16a34a}
+.bl-row{display:grid;grid-template-columns:minmax(120px,1fr) minmax(0,1.6fr) 90px auto;gap:10px;align-items:center;padding:9px 4px;border-bottom:1px solid var(--line)}
+.bl-row:last-child{border-bottom:0}
+.bl-error{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:1100px){.dash-extras{grid-template-columns:1fr}}

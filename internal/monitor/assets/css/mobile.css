@@ -1,0 +1,40 @@
+/* 手机端（<=640px）：导航压成一行、卡片单列、表格横向滚动 */
+@media (max-width:640px){
+  .side{position:relative;height:auto;border-bottom:1px solid var(--line)}
+  .brand{padding:10px 14px}
+  .brand-text span{display:none}
+  .nav{display:flex;gap:6px;overflow-x:auto;padding:4px 10px 10px;grid-template-columns:none}
+  .nav::-webkit-scrollbar{display:none}
+  .nav-group{display:none}
+  .nav-item{flex:0 0 auto;padding:7px 10px;border-radius:10px;white-space:nowrap}
+  .nav-item .label{font-size:12.5px}
+  .side-status{display:none}
+  .topbar{padding:8px 12px;gap:6px}
+  .crumbs{font-size:12px}
+  .crumbs .sep{display:none}
+  .crumbs #crumbGroup{display:none}
+  .view{padding:12px;gap:12px}
+  .card{padding:0}
+  .card-head{padding:12px 14px;gap:8px;flex-wrap:wrap}
+  .card-head h2{font-size:14.5px;white-space:nowrap}
+  .card-head p.muted{flex:1 0 100%;font-size:12px}
+  .card-body{padding:12px 14px}
+  .kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .kpi{padding:12px 14px}
+  .kpi-value{font-size:20px}
+  .dash-grid,.dash-grid.two,.dash-extras,.port-stats,.port-summary,.result-metrics,.bulk-grid{grid-template-columns:1fr!important}
+  .dash-strip{padding:12px 14px}
+  .table,.debug-list,.port-list-limited{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .debug-row{grid-template-columns:minmax(96px,1fr) auto;gap:8px;min-width:0}
+  .debug-row span:nth-child(3),.debug-row span:nth-child(4),.debug-row span:nth-child(5),.debug-row span:nth-child(6){grid-column:1/-1}
+  .bl-row{grid-template-columns:1fr auto}
+  .bl-row .bl-error,.bl-row .muted{grid-column:1/-1}
+  .settings-section-head{gap:8px}
+  .settings-form{grid-template-columns:1fr}
+  .settings-actions{justify-content:stretch}
+  .settings-actions .btn{width:100%}
+  .btn{padding:9px 12px}
+  .segmented{width:100%;overflow-x:auto}
+  .traffic-spark{height:56px}
+  .modal .dialog{width:calc(100% - 24px);max-height:88vh}
+}

@@ -152,6 +152,11 @@ function renderSettings(){
   const blacklistSeconds=durationSeconds(pool.blacklist_duration,600);
   const rotationSeconds=durationSeconds(pool.rotation_interval,120);
   const sticky=s.sticky||{};
+  const transientSeconds=durationSeconds(pool.transient_cooldown,60);
+  const rateLimitSeconds=durationSeconds(pool.rate_limit_cooldown,300);
+  const blacklistPin=pool.blacklist_failed_pin!==false;
+  const probeConcurrency=Number(management.probe_concurrency)||32;
+  const logCfg=s.log||{};
   const sessionEnabled=sticky.session_enabled!==false;
   const sessionTTLHours=Math.max(1,Math.round(durationSeconds(sticky.session_ttl,86400)/3600));
   const maxSessions=Number(sticky.max_sessions)||10000;
@@ -184,6 +189,7 @@ function renderSettings(){
             <div class="field"><label>探测目标</label><select id="setProbe"><option value="https://www.gstatic.com/generate_204">gstatic generate_204</option><option value="https://cp.cloudflare.com/generate_204">cloudflare generate_204</option></select></div>
             <div class="field"><label>外部 IP</label><input id="setExternal" value="${esc(s.external_ip||'')}" placeholder="留空则使用当前访问地址"></div>
             <div class="field"><label>管理监听</label><input id="setMgmtListen" value="${esc(management.listen||'')}"></div>
+            <div class="field"><label>探测并发</label><input id="setProbeConcurrency" type="number" min="1" max="1024" value="${esc(probeConcurrency)}"></div>
             <label class="toggle-row wide"><input id="setSkip" type="checkbox" ${s.skip_cert_verify?'checked':''} style="width:auto"><div><strong>跳过证书验证</strong></div></label>
           </div>
         </div>
@@ -215,7 +221,10 @@ function renderSettings(){
             <div class="field"><label>失败次数</label><input id="setFail" type="number" min="1" value="${esc(pool.failure_threshold||2)}"></div>
             <div class="field"><label>黑名单时间（秒）</label><input id="setBlacklist" type="number" min="1" step="1" value="${esc(blacklistSeconds)}"></div>
             <div class="field"><label>轮换间隔（秒）</label><input id="setRotateInterval" type="number" min="1" step="1" value="${esc(rotationSeconds)}"></div>
+            <div class="field"><label>瞬时故障冷却（秒）</label><input id="setPoolTransient" type="number" min="1" step="1" value="${esc(transientSeconds)}"></div>
+            <div class="field"><label>限流(429)冷却（秒）</label><input id="setPoolRateLimit" type="number" min="1" step="1" value="${esc(rateLimitSeconds)}"></div>
           </div>
+          <label class="toggle-row"><input id="setBlacklistPin" type="checkbox" ${blacklistPin?'checked':''} style="width:auto"><div><strong>绑定节点拨号失败时立即拉黑</strong><span class="muted">命名会话固定的节点失败后马上进黑名单，不等累计阈值</span></div></label>
           <div class="settings-actions"><button class="btn primary" onclick="saveSettings()">保存运行设置并重载</button></div>
         </div>
       </section>
@@ -236,6 +245,21 @@ function renderSettings(){
           <div class="settings-form">
             <div class="field"><label>粘性端口</label><input id="setStickyPort" type="number" min="0" max="65535" value="${esc(sticky.port||0)}" placeholder="0 表示自动使用 Pool 端口 + 1"></div>
           </div>
+          <div class="settings-actions"><button class="btn secondary" onclick="saveSettings()">保存运行设置并重载</button></div>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-head"><h2>日志</h2></div>
+        <div class="settings-section-body">
+          <div class="settings-form">
+            <div class="field"><label>输出</label><select id="setLogOutput"><option value="stdout">stdout</option><option value="file">file（轮转）</option></select></div>
+            <div class="field"><label>单文件上限（MB）</label><input id="setLogMaxSize" type="number" min="1" value="${esc(logCfg.max_size||50)}"></div>
+            <div class="field"><label>保留文件数</label><input id="setLogMaxBackups" type="number" min="1" value="${esc(logCfg.max_backups||3)}"></div>
+            <div class="field"><label>保留天数</label><input id="setLogMaxAge" type="number" min="1" value="${esc(logCfg.max_age||7)}"></div>
+          </div>
+          <label class="toggle-row"><input id="setLogCompress" type="checkbox" ${logCfg.compress?'checked':''} style="width:auto"><div><strong>压缩轮转日志</strong></div></label>
+          <p class="muted">写文件时请确认容器的 <code>/app/logs</code> 已挂载。</p>
           <div class="settings-actions"><button class="btn secondary" onclick="saveSettings()">保存运行设置并重载</button></div>
         </div>
       </section>
@@ -337,6 +361,8 @@ function renderSettings(){
   qs('#setMode').value=s.mode||'pool';
   qs('#setProbe').value=probeTarget;
   qs('#setPoolMode').value=pool.mode||'sequential';
+  const logOutput=qs('#setLogOutput');
+  if(logOutput)logOutput.value=logCfg.output==='file'?'file':'stdout';
 }
 function allBindingTags(){return [...new Set((S.importSources||[]).map(source=>String(source.tag_prefix||'').trim()).filter(Boolean))]}
 function toggleBindingTag(tag,checked){
@@ -434,8 +460,9 @@ async function saveSettings(){
     skip_cert_verify:qs('#setSkip').checked,
     listener:{address:qs('#setListenAddr').value.trim(),port:Number(qs('#setListenPort').value)||0,username:currentListener.username||'',password:currentListener.password||''},
     multi_port:{address:qs('#setMultiAddr').value.trim(),base_port:Number(qs('#setMultiPort').value)||0,username:qs('#setMultiUser').value,password:qs('#setMultiPass').value},
-    pool:{mode:qs('#setPoolMode').value.trim()||'sequential',failure_threshold:Number(qs('#setFail').value)||2,blacklist_duration:secondsDuration(qs('#setBlacklist').value,600),rotation_interval:secondsDuration(qs('#setRotateInterval').value,120)},
-    management:{listen:qs('#setMgmtListen').value.trim(),password:currentMgmt.password||''},
+    pool:{mode:qs('#setPoolMode').value.trim()||'sequential',failure_threshold:Number(qs('#setFail').value)||2,blacklist_duration:secondsDuration(qs('#setBlacklist').value,600),rotation_interval:secondsDuration(qs('#setRotateInterval').value,120),transient_cooldown:secondsDuration(qs('#setPoolTransient')?.value,60),rate_limit_cooldown:secondsDuration(qs('#setPoolRateLimit')?.value,300),blacklist_failed_pin:!!qs('#setBlacklistPin')?.checked},
+    management:{listen:qs('#setMgmtListen').value.trim(),password:currentMgmt.password||'',probe_concurrency:Number(qs('#setProbeConcurrency')?.value)||0},
+    log:{output:qs('#setLogOutput')?.value||logCfg.output||'stdout',max_size:Number(qs('#setLogMaxSize')?.value)||0,max_backups:Number(qs('#setLogMaxBackups')?.value)||0,max_age:Number(qs('#setLogMaxAge')?.value)||0,compress:!!qs('#setLogCompress')?.checked},
     sticky:{
       session_enabled:qs('#setSessionEnabled')?.checked!==false,
       session_ttl:ttlHours+'h',

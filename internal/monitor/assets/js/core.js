@@ -45,6 +45,8 @@ const S={
   runtime:[],
   configNodes:[],
   ports:null,
+  nodesLive:null,
+  traffic:{up:[],down:[]},
   sessions:null,
   settings:null,
   subConfig:null,
@@ -124,6 +126,7 @@ const pages=[
   ['failed','失败节点','alert','节点'],
   ['bulk','批量工具','layers','工具'],
   ['connectivity','站点检测','globe','工具'],
+  ['diagnostics','诊断','cpu','工具'],
   ['sessions','会话路由','activity','工具'],
   ['ports','端口状态','network','工具'],
   ['logs','日志','logs','系统'],
@@ -369,6 +372,7 @@ function renderFatal(err){
     <p class="muted">如果仍失败，在服务器执行 <code>docker compose logs --tail=100 easy_proxies</code> 查看后端日志。</p></div>`;
 }
 async function refresh(){
+  if(S.page!=='dashboard')stopTrafficStream();
   const request=beginPageRequest();
   try{
     if(['nodes','pool','failed'].includes(S.page)){
@@ -404,10 +408,15 @@ async function refresh(){
 	  await loadConnectivityScopes(request);
 	  if(!isCurrentPageRequest(request))return;
 	  renderConnectivity();
+	}else if(S.page==='diagnostics'){
+	  await loadDiagnostics(request);
+	  if(!isCurrentPageRequest(request))return;
+	  renderDiagnostics();
 	}else if(S.page==='dashboard'){
 	  await loadDashboard(request);
 	  if(!isCurrentPageRequest(request))return;
 	  renderDashboard();
+	  renderDashboardExtras();
 	}else{
       await Promise.all([loadSubscriptionConfig(request),loadImportSources(request),loadImportSummary(request),loadPortPreview(request),loadChainProfiles(request)]);
       if(!isCurrentPageRequest(request))return;

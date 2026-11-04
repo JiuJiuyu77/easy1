@@ -1378,11 +1378,16 @@ func (m *Manager) nextAvailablePortLocked() uint16 {
 	if base == 0 {
 		base = 24000
 	}
-	used := make(map[uint16]struct{}, len(m.cfg.Nodes))
+	used := make(map[uint16]struct{}, len(m.cfg.Nodes)+8)
 	for _, node := range m.cfg.Nodes {
 		if node.Port > 0 {
 			used[node.Port] = struct{}{}
 		}
+	}
+	// Never hand out a port this process listens on (proxy entry, sticky entry,
+	// management API, Clash traffic controller, GeoIP); binding it would fail.
+	for reserved := range m.cfg.ReservedListenerPorts() {
+		used[reserved] = struct{}{}
 	}
 	port := base
 	for i := 0; i < 1<<16; i++ {

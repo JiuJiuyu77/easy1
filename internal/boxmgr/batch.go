@@ -580,6 +580,10 @@ func (m *Manager) storePortIndexLocked() {
 // probed again; only genuinely new candidates are checked against the OS.
 // Callers must hold m.mu.
 func (m *Manager) assignSequentialPortsLocked() error {
+	// Only multi-port/hybrid give each node its own listener.
+	if m.cfg.Mode != "multi-port" && m.cfg.Mode != "hybrid" {
+		return nil
+	}
 	base := m.cfg.MultiPort.BasePort
 	if base == 0 {
 		base = 24000
@@ -588,12 +592,13 @@ func (m *Manager) assignSequentialPortsLocked() error {
 	if address == "" {
 		address = "0.0.0.0"
 	}
-	mine := make(map[uint16]struct{}, len(m.cfg.Nodes))
+	mine := make(map[uint16]struct{}, len(m.cfg.Nodes)+8)
 	for _, node := range m.cfg.Nodes {
 		if node.Port > 0 {
 			mine[node.Port] = struct{}{}
 		}
 	}
+	reserved := m.cfg.ReservedListenerPorts()
 	assigned := make(map[uint16]struct{}, len(m.cfg.Nodes))
 	cursor := uint32(base)
 	for i := range m.cfg.Nodes {
@@ -608,7 +613,8 @@ func (m *Manager) assignSequentialPortsLocked() error {
 			if _, taken := assigned[candidate]; taken {
 				continue
 			}
-			if m.cfg.Mode == "hybrid" && candidate == m.cfg.Listener.Port {
+			if reserved[candidate] {
+				// Listener/management/sticky/GeoIP ports are ours, not a node's.
 				continue
 			}
 			if _, held := mine[candidate]; !held && !config.IsPortAvailable(address, candidate) {

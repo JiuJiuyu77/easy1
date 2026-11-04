@@ -1,14 +1,15 @@
 async function loadDashboard(request){
-  const [diagnostics,subStatus]=await Promise.all([
+  const [diagnostics,subStatus,liveNodes]=await Promise.all([
     api('/api/diagnostics',{signal:request?.signal}).catch(err=>{if(isAbortError(err))throw err;return null}),
     api('/api/subscription/status',{signal:request?.signal}).catch(err=>{if(isAbortError(err))throw err;return null}),
     loadImportSummary(request),
     loadImportSources(request),
     loadSubscriptionConfig(request),
-    loadSettings(request).catch(err=>{if(isAbortError(err))throw err})
+    loadSettings(request).catch(err=>{if(isAbortError(err))throw err}),
+    api('/api/nodes',{signal:request?.signal}).catch(err=>{if(isAbortError(err))throw err;return null})
   ]);
   if(!isCurrentPageRequest(request))return;
-  S.diagnostics=diagnostics;S.subStatus=subStatus;S.shellStatusAt=Date.now();
+  S.diagnostics=diagnostics;S.subStatus=subStatus;S.nodesLive=liveNodes;S.shellStatusAt=Date.now();
 }
 function validTime(value){const d=new Date(value||0);return d.getFullYear()>2000?d:null}
 function relativeTime(value){
@@ -128,3 +129,106 @@ function tickDashboardClock(){
 }
 function startDashboardClock(){stopDashboardClock();tickDashboardClock();S.dashClock=setInterval(tickDashboardClock,1000)}
 function stopDashboardClock(){if(S.dashClock){clearInterval(S.dashClock);S.dashClock=null}}
+
+// ---- 上游旧面板能力：实时流量 / 入口链接复制 / 黑名单节点 ----
+let trafficSource=null;
+function formatBytes(bytes){
+  const n=Number(bytes)||0;
+  if(n<1024)return n+' B';
+  if(n<1024*1024)return (n/1024).toFixed(1)+' KB';
+  if(n<1024*1024*1024)return (n/1024/1024).toFixed(2)+' MB';
+  return (n/1024/1024/1024).toFixed(2)+' GB';
+}
+function stopTrafficStream(){
+  if(trafficSource){try{trafficSource.close()}catch(e){}trafficSource=null}
+  setTrafficStatus('未连接');
+}
+function setTrafficStatus(text,tone=''){
+  const el=qs('#trafficStatus');
+  if(el){el.textContent=text;el.className='pill '+(tone||'')}
+}
+function renderTrafficSpark(){
+  const host=qs('#trafficSpark');
+  if(!host)return;
+  const up=S.traffic?.up||[],down=S.traffic?.down||[];
+  if(!up.length){host.innerHTML='<p class="muted">等待流量数据…</p>';return}
+  const max=Math.max(1,...up,...down);
+  const points=arr=>arr.map((v,i)=>`${(i/Math.max(arr.length-1,1)*100).toFixed(2)},${(100-(v/max)*100).toFixed(2)}`).join(' ');
+  host.innerHTML=`<svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="最近 60 秒上下行速率">
+    <polyline class="spark down" points="${points(down)}"/>
+    <polyline class="spark up" points="${points(up)}"/>
+  </svg>`;
+}
+function connectTraffic(){
+  if(trafficSource||!window.EventSource)return;
+  S.traffic=S.traffic||{up:[],down:[]};
+  try{trafficSource=new EventSource('/api/traffic')}catch(e){setTrafficStatus('不可用','amber');return}
+  setTrafficStatus('连接中','amber');
+  trafficSource.onmessage=event=>{
+    try{
+      const data=JSON.parse(event.data);
+      const up=Number(data.up)||0,down=Number(data.down)||0;
+      S.traffic.up.push(up);S.traffic.down.push(down);
+      if(S.traffic.up.length>60){S.traffic.up.shift();S.traffic.down.shift()}
+      setTrafficStatus('实时','green');
+      const upEl=qs('#liveUpSpeed'),downEl=qs('#liveDownSpeed');
+      if(upEl)upEl.textContent=formatBytes(up)+'/s';
+      if(downEl)downEl.textContent=formatBytes(down)+'/s';
+      renderTrafficSpark();
+    }catch(e){}
+  };
+  trafficSource.onerror=()=>{
+    setTrafficStatus('未连接','amber');
+    if(trafficSource){try{trafficSource.close()}catch(e){}trafficSource=null}
+  };
+}
+async function copyPoolEntry(scheme){
+  try{
+    const data=await api('/api/proxy-sessions/links',{method:'POST',body:JSON.stringify({session_id:'',scheme})});
+    if(scheme==='curl'){
+      const url=String(data.url||'').replace(/\/\/[^@]*@/,'//用户名:密码@');
+      await copyText(`curl -x ${url} https://github.com/`);
+      toast('已复制 curl 命令（需自行替换成真实密码）');
+      return;
+    }
+    await copyText(data.url||'');
+    toast('已复制入口链接（含真实密码，勿外传）');
+  }catch(err){toast(err.message,'err')}
+}
+function renderBlacklistCard(){
+  const nodes=((S.nodesLive&&S.nodesLive.nodes)||[]).filter(n=>n.blacklisted);
+  return `<div class="card"><div class="card-head"><div><h2>黑名单节点</h2><p class="muted">被拉黑或冷却中的节点不会参与调度</p></div><span class="pill ${nodes.length?'red':'green'}">${nodes.length}</span></div>
+    <div class="card-body">${nodes.length?nodes.map(n=>`<div class="table-row bl-row">
+        <span class="mono">${esc(n.name||n.tag)}</span>
+        <span class="muted bl-error" title="${esc(n.last_error||'')}">${esc(n.last_error||'冷却中')}</span>
+        <span class="muted">${esc(relativeTime(n.blacklisted_until))}</span>
+        <span class="row-actions"><button class="btn small green" type="button" onclick="releaseDebugNode('${esc(n.tag)}')">解封</button></span>
+      </div>`).join(''):'<div class="empty">没有被拉黑的节点</div>'}</div></div>`;
+}
+function renderDashboardExtras(){
+  const host=qs('#view');
+  if(!host)return;
+  const wrap=document.createElement('div');
+  wrap.className='dash-extras';
+  wrap.innerHTML=`
+    <div class="card"><div class="card-head"><h2>实时流量</h2><span id="trafficStatus" class="pill">未连接</span></div>
+      <div class="card-body"><div class="kv-grid">
+        <div><span>上行</span><strong id="liveUpSpeed">0 B/s</strong></div>
+        <div><span>下行</span><strong id="liveDownSpeed">0 B/s</strong></div>
+      </div><div id="trafficSpark" class="traffic-spark"></div>
+      <p class="muted">流量统计需要镜像带 <code>with_clash_api</code>（Docker 镜像默认开启）。</p></div></div>
+    <div class="card"><div class="card-head"><h2>入口链接</h2></div>
+      <div class="card-body stack">
+        <p class="muted">共享入口：${esc(dashboardEntry())}</p>
+        <div class="settings-actions">
+          <button class="btn small secondary" type="button" onclick="copyPoolEntry('http')">复制 HTTP</button>
+          <button class="btn small secondary" type="button" onclick="copyPoolEntry('socks5')">复制 SOCKS5</button>
+          <button class="btn small secondary" type="button" onclick="copyPoolEntry('curl')">复制 curl</button>
+        </div></div></div>`;
+  host.appendChild(wrap);
+  const holder=document.createElement('div');
+  holder.innerHTML=renderBlacklistCard();
+  host.appendChild(holder.firstElementChild);
+  connectTraffic();
+  renderTrafficSpark();
+}
