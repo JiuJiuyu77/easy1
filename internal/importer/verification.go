@@ -23,7 +23,7 @@ func NormalizeVerificationPolicy(test204 *bool, siteTargets []string) (Verificat
 		}
 		wanted[id] = struct{}{}
 	}
-	for _, target := range connectivityTargets {
+	for _, target := range newAllTargets() {
 		if _, ok := wanted[target.ID]; ok {
 			policy.SiteTargets = append(policy.SiteTargets, target.ID)
 		}

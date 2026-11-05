@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **手机端适配**：新增 `mobile.css`，导航在窄屏压成一行横向滚动、卡片单列、表格横向滚动、表单与按钮全宽，设置区不再被挤成竖排。
 
 ### Added
+- **自定义站点检测**：`verification.custom_sites`（id/name/url/marker），保存后自动进入「节点可用条件」与「站点检测」页，可在站点检测页增删。
+- **订阅源自定义**：`subscription_sources`（每条订阅单独设置客户端 UA / Referer），导入与定时刷新优先使用；仍会保留自动 UA 尝试作为回退。
+- **全局探测配置入口**：顶栏新增「探测配置」按钮，任何页面一点即开（目标 + 任一/全部判定）；设置页基础运行区改为摘要 + 编辑按钮，避免重复控件。
 - **探测配置在三个测速入口都可编辑**：导入页顶部「探测配置」卡片、批量工具页顶部卡片、设置页「订阅刷新」区块内嵌同一份编辑器（外加基础运行区的字段），保存即生效、无需重启。
 - **版本可核对**：`/api/diagnostics` 返回构建 commit，侧栏底部显示 `v<sha>`（Dockerfile 通过 `-ldflags` 注入，workflow 传 `GITHUB_SHA`），用来确认正在跑的是不是新镜像。
 - **刷新复用每源成功客户端**：订阅刷新会沿用该源上次成功的 UA/请求头，减少再次触发 UA 限制。

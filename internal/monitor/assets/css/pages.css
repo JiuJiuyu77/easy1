@@ -307,3 +307,9 @@ pre.log-view{height:100%;max-height:none;background:#0f172a;color:#cbd5e1;border
 /* 探测目标编辑器 */
 .probe-editor{display:grid;gap:8px;margin-top:10px;padding:12px;border:1px dashed var(--line-strong);border-radius:var(--radius);background:rgba(255,255,255,.5)}
 .probe-editor textarea{width:100%;min-height:70px}
+
+/* 订阅源自定义 UA/Referer */
+.sub-source-editor{display:grid;gap:8px;margin-top:10px;padding:12px;border:1px dashed var(--line-strong);border-radius:var(--radius)}
+.sub-source-row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:center}
+.sub-source-row input{width:100%}
+@media(max-width:760px){.sub-source-row{grid-template-columns:1fr}}

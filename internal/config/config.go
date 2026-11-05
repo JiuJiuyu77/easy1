@@ -35,6 +35,8 @@ type Config struct {
 	SubscriptionRefresh SubscriptionRefreshConfig `yaml:"subscription_refresh"`
 	GeoIP               GeoIPConfig               `yaml:"geoip"`
 	DNS                 DNSConfig                 `yaml:"dns"`
+	Verification        VerificationConfig        `yaml:"verification"`
+	SubSources          []SubscriptionSource      `yaml:"subscription_sources,omitempty" json:"subscription_sources,omitempty"`
 	Log                 LogConfig                 `yaml:"log"`
 	WebDAV              WebDAVConfig              `yaml:"webdav"`
 	ChainProfiles       []proxychain.Profile      `yaml:"chain_profiles,omitempty" json:"chain_profiles,omitempty"`
@@ -46,6 +48,56 @@ type Config struct {
 	SkipCertVerify      bool                      `yaml:"skip_cert_verify"` // 全局跳过 SSL 证书验证
 
 	filePath string `yaml:"-"` // 配置文件路径，用于保存
+}
+
+// SubscriptionSource is per-URL fetch configuration (client identity + headers).
+type SubscriptionSource struct {
+	URL       string            `yaml:"url" json:"url"`
+	UserAgent string            `yaml:"user_agent,omitempty" json:"user_agent,omitempty"`
+	Headers   map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+}
+
+// CustomSite is an operator-defined reachability check target (used by the
+// connectivity page and site verification).
+type CustomSite struct {
+	ID     string `yaml:"id" json:"id"`
+	Name   string `yaml:"name" json:"name"`
+	URL    string `yaml:"url" json:"url"`
+	Marker string `yaml:"marker,omitempty" json:"marker,omitempty"`
+}
+
+// VerificationConfig groups import/refresh verification settings.
+type VerificationConfig struct {
+	CustomSites []CustomSite `yaml:"custom_sites,omitempty" json:"custom_sites,omitempty"`
+}
+
+// NormalizeVerification applies defaults and de-duplicates custom sites.
+func (c *Config) NormalizeVerification() { c.normalizeVerification() }
+
+func (c *Config) normalizeVerification() {
+	sites := make([]CustomSite, 0, len(c.Verification.CustomSites))
+	seen := make(map[string]struct{}, len(c.Verification.CustomSites))
+	for _, site := range c.Verification.CustomSites {
+		site.ID = strings.ToLower(strings.TrimSpace(site.ID))
+		site.Name = strings.TrimSpace(site.Name)
+		site.URL = strings.TrimSpace(site.URL)
+		site.Marker = strings.TrimSpace(site.Marker)
+		if site.URL == "" {
+			continue
+		}
+		if site.ID == "" {
+			continue
+		}
+		if _, dup := seen[site.ID]; dup {
+			continue
+		}
+		seen[site.ID] = struct{}{}
+		if site.Name == "" {
+			site.Name = site.ID
+		}
+		sites = append(sites, site)
+	}
+	c.Verification.CustomSites = sites
 }
 
 // DNSConfig controls the resolver sing-box uses for node domains. Empty Server
@@ -73,6 +125,7 @@ func normalizeDNSStrategy(strategy string) string {
 // NormalizeDNS applies defaults and de-duplicates the resolver settings.
 func (c *Config) NormalizeDNS() {
 	c.normalizeDNS()
+	c.normalizeVerification()
 }
 
 func (c *Config) normalizeDNS() {
@@ -574,6 +627,7 @@ func (c *Config) normalize() error {
 		c.Management.Listen = "127.0.0.1:9091"
 	}
 	c.normalizeDNS()
+	c.normalizeVerification()
 	c.Management.ProbeTargets = normalizeProbeTargets(c.Management.ProbeTarget, c.Management.ProbeTargets)
 	c.Management.ProbePolicy = normalizeProbePolicy(c.Management.ProbePolicy)
 	// Keep the legacy single value in sync with the first configured target.
@@ -977,6 +1031,7 @@ func (c *Config) NormalizeWithPortMap(portMap map[string]uint16) error {
 		c.Management.Listen = "127.0.0.1:9091"
 	}
 	c.normalizeDNS()
+	c.normalizeVerification()
 	c.Management.ProbeTargets = normalizeProbeTargets(c.Management.ProbeTarget, c.Management.ProbeTargets)
 	c.Management.ProbePolicy = normalizeProbePolicy(c.Management.ProbePolicy)
 	// Keep the legacy single value in sync with the first configured target.
@@ -2213,8 +2268,9 @@ func (c *Config) SettingsSnapshot() Config {
 	return Config{
 		Mode: c.Mode, Listener: c.Listener, MultiPort: c.MultiPort, Pool: c.Pool,
 		Sticky: c.Sticky, Management: c.Management, ExternalIP: c.ExternalIP,
-		SkipCertVerify: c.SkipCertVerify, Log: c.Log, GeoIP: c.GeoIP, DNS: c.DNS,
-		filePath: c.filePath,
+		SkipCertVerify: c.SkipCertVerify, Log: c.Log, GeoIP: c.GeoIP, DNS: c.DNS, Verification: c.Verification,
+		SubSources: c.SubSources,
+		filePath:   c.filePath,
 	}
 }
 
@@ -2262,6 +2318,8 @@ func (c *Config) saveSettings(includeSubscriptions bool) error {
 		}
 		saveCfg.GeoIP = c.GeoIP
 		saveCfg.DNS = c.DNS
+		saveCfg.Verification = c.Verification
+		saveCfg.SubSources = c.SubSources
 		saveCfg.Mode = c.Mode
 		saveCfg.Listener = c.Listener
 		saveCfg.MultiPort = c.MultiPort

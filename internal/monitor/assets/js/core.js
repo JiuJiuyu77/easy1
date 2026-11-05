@@ -411,7 +411,7 @@ async function refresh(){
 	  if(!isCurrentPageRequest(request))return;
 	  renderSessions();
 	}else if(S.page==='connectivity'){
-	  await loadConnectivityScopes(request);
+	  await Promise.all([loadConnectivityScopes(request),loadSettings(request).catch(err=>{if(isAbortError(err))throw err})]);
 	  if(!isCurrentPageRequest(request))return;
 	  renderConnectivity();
 	}else if(S.page==='diagnostics'){

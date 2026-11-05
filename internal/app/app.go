@@ -138,6 +138,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			cfg.MultiPort.Password,
 		))
 	}
+	importer.SetCustomSites(cfg.Verification.CustomSites)
+	importer.SetSubscriptionSources(cfg.SubSources)
 	tester := importer.NewNodeTester(builder.BuildSingleNodeOutbound, testerOptions...)
 	defer tester.Close()
 

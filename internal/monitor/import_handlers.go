@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"easy_proxies/internal/config"
 	"easy_proxies/internal/importer"
 	"easy_proxies/internal/proxychain"
 )
@@ -55,6 +56,7 @@ type ImportService interface {
 	JobEventStats() importer.JobEventStats
 	ProbeSchedulerStats() importer.ProbeSchedulerStats
 	SetProbeTargets(targets []string, policy string)
+	SetCustomSites(sites []config.CustomSite)
 	SetChainProfiles(profiles []proxychain.Profile) error
 	ChainProfiles() []proxychain.Profile
 	TestChainProfile(ctx context.Context, id string) importer.ChainProbeResult

@@ -14,7 +14,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -50,7 +52,7 @@ type connectivityTargetSpec struct {
 	components []connectivityComponentSpec
 }
 
-var connectivityTargetSpecs = []connectivityTargetSpec{
+var builtinConnectivityTargetSpecs = []connectivityTargetSpec{
 	{
 		target: ConnectivityTarget{ID: "google", Name: "Google", Host: "www.google.com", Port: 443, URL: "https://www.google.com/"},
 		components: []connectivityComponentSpec{{
@@ -78,13 +80,83 @@ var connectivityTargetSpecs = []connectivityTargetSpec{
 	},
 }
 
-var connectivityTargets = func() []ConnectivityTarget {
-	targets := make([]ConnectivityTarget, 0, len(connectivityTargetSpecs))
-	for _, spec := range connectivityTargetSpecs {
+var (
+	customSitesMu   sync.RWMutex
+	customSiteSpecs []connectivityTargetSpec
+)
+
+// allTargetSpecs returns the built-in sites plus operator-defined ones.
+func allTargetSpecs() []connectivityTargetSpec {
+	customSitesMu.RLock()
+	custom := append([]connectivityTargetSpec(nil), customSiteSpecs...)
+	customSitesMu.RUnlock()
+	specs := make([]connectivityTargetSpec, 0, len(builtinConnectivityTargetSpecs)+len(custom))
+	specs = append(specs, builtinConnectivityTargetSpecs...)
+	specs = append(specs, custom...)
+	return specs
+}
+
+func newAllTargets() []ConnectivityTarget {
+	specs := allTargetSpecs()
+	targets := make([]ConnectivityTarget, 0, len(specs))
+	for _, spec := range specs {
 		targets = append(targets, spec.target)
 	}
 	return targets
-}()
+}
+
+// SetCustomSites installs operator-defined check targets (name + URL + optional
+// marker). They take part in site verification and the connectivity page just
+// like the built-in ones.
+func SetCustomSites(sites []config.CustomSite) {
+	specs := make([]connectivityTargetSpec, 0, len(sites))
+	seen := make(map[string]struct{}, len(sites))
+	for _, site := range sites {
+		id := strings.ToLower(strings.TrimSpace(site.ID))
+		urlValue := strings.TrimSpace(site.URL)
+		if id == "" || urlValue == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		name := strings.TrimSpace(site.Name)
+		if name == "" {
+			name = id
+		}
+		host, port := siteHostPort(urlValue)
+		marker := strings.TrimSpace(site.Marker)
+		spec := connectivityTargetSpec{
+			target: ConnectivityTarget{ID: id, Name: name, Host: host, Port: port, URL: urlValue, Custom: true},
+			components: []connectivityComponentSpec{{
+				id: "page", name: name + " 页面", url: urlValue, allowedHosts: []string{host}, marker: marker,
+			}},
+		}
+		specs = append(specs, spec)
+	}
+	customSitesMu.Lock()
+	customSiteSpecs = specs
+	customSitesMu.Unlock()
+}
+
+// siteHostPort extracts host/port for metadata (best effort).
+func siteHostPort(rawURL string) (string, uint16) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Hostname() == "" {
+		return "", 443
+	}
+	port := uint16(443)
+	if parsed.Scheme == "http" {
+		port = 80
+	}
+	if rawPort := parsed.Port(); rawPort != "" {
+		if value, convErr := strconv.ParseUint(rawPort, 10, 16); convErr == nil {
+			port = uint16(value)
+		}
+	}
+	return parsed.Hostname(), port
+}
 
 var (
 	errConnectivityRedirectLimit = errors.New("connectivity redirect limit")
@@ -115,12 +187,12 @@ type connectivityOutbound struct {
 }
 
 func ConnectivityTargets() []ConnectivityTarget {
-	return append([]ConnectivityTarget(nil), connectivityTargets...)
+	return newAllTargets()
 }
 
 func connectivityTargetByID(id string) (ConnectivityTarget, bool) {
 	id = strings.ToLower(strings.TrimSpace(id))
-	for _, target := range connectivityTargets {
+	for _, target := range newAllTargets() {
 		if target.ID == id {
 			return target, true
 		}
@@ -129,7 +201,7 @@ func connectivityTargetByID(id string) (ConnectivityTarget, bool) {
 }
 
 func connectivityTargetSpecFor(target ConnectivityTarget) connectivityTargetSpec {
-	for _, spec := range connectivityTargetSpecs {
+	for _, spec := range allTargetSpecs() {
 		if spec.target.ID == target.ID {
 			return spec
 		}
@@ -800,10 +872,10 @@ func (t *NodeTester) probeConnectivityPass(ctx context.Context, nodes []ManagedN
 }
 
 func (t *NodeTester) probeConnectivityNode(ctx context.Context, node ManagedNode, selected map[string]struct{}, attempt int, timeout time.Duration) []ConnectivityResult {
-	targets := connectivityTargets
+	targets := newAllTargets()
 	if selected != nil {
 		targets = make([]ConnectivityTarget, 0, len(selected))
-		for _, target := range connectivityTargets {
+		for _, target := range newAllTargets() {
 			if _, ok := selected[target.ID]; ok {
 				targets = append(targets, target)
 			}
@@ -1322,7 +1394,7 @@ func (s *Service) connectivityPoolSelection(req ConnectivityPortRequest) (connec
 
 func connectivityPoolFailureReason(targetID string, result ConnectivityResult) string {
 	targetName := targetID
-	for _, target := range connectivityTargets {
+	for _, target := range newAllTargets() {
 		if target.ID == targetID {
 			targetName = target.Name
 			break

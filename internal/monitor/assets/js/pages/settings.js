@@ -190,16 +190,16 @@ function renderSettings(){
         <div class="settings-section-body">
           <div class="settings-form">
             <div class="field"><label>运行模式</label><select id="setMode"><option value="pool">pool</option><option value="multi-port">multi-port</option><option value="hybrid">hybrid</option></select></div>
-            <div class="field wide"><label>探测目标（每行一个，可填任意 http(s) URL 或 host:port）</label>
-              <textarea id="setProbeTargets" rows="3" placeholder="https://www.gstatic.com/generate_204&#10;https://www.github.com/">${esc(probeTargets.join('\n'))}</textarea>
-              <div class="probe-presets">
-                <button class="btn small ghost" type="button" onclick="addProbeTarget('https://www.gstatic.com/generate_204')">+ gstatic 204</button>
-                <button class="btn small ghost" type="button" onclick="addProbeTarget('https://cp.cloudflare.com/generate_204')">+ cloudflare 204</button>
-                <button class="btn small ghost" type="button" onclick="addProbeTarget('https://www.github.com/')">+ GitHub</button>
-                <button class="btn small ghost" type="button" onclick="addProbeTarget('https://www.apple.com/')">+ Apple</button>
+            <div class="field wide"><label>探测目标与判定方式</label>
+              <div class="probe-summary">
+                <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+                  <span class="pill green">${probeTargets.length} 个目标</span>
+                  <span class="pill">${probePolicy==='all'?'全部通过':'任一通过'}</span>
+                  <button class="btn small secondary" type="button" onclick="openProbeConfig()">编辑探测配置</button>
+                </div>
+                <p class="muted">${esc(probeTargets.join(' · '))}</p>
               </div>
             </div>
-            <div class="field"><label>判定方式</label><select id="setProbePolicy"><option value="any">任一通过即算可用</option><option value="all">全部通过才算可用</option></select></div>
             <div class="field"><label>外部 IP</label><input id="setExternal" value="${esc(s.external_ip||'')}" placeholder="留空则使用当前访问地址"></div>
             <div class="field"><label>管理监听</label><input id="setMgmtListen" value="${esc(management.listen||'')}"></div>
             <div class="field"><label>探测并发</label><input id="setProbeConcurrency" type="number" min="1" max="1024" value="${esc(probeConcurrency)}"></div>
@@ -332,6 +332,7 @@ function renderSettings(){
             <div class="field"><label>分钟</label><input id="subMinutes" type="number" min="0" max="59" value="${interval.minutes}"></div>
           </div>
           <button class="btn secondary block" onclick="saveAutoRefresh()">保存自动刷新设置</button>
+          ${subSourceEditorHTML()}
           <p class="muted">刷新时会按下面的探测目标重新验证节点；连续失败会按 2^n 退避（上限 30 分钟）。</p>
           ${probeTargetsEditorHTML('refresh')}
         </div>
@@ -538,17 +539,11 @@ async function saveSettings(){
   if(ttlHours<1||ttlHours>8760){toast('会话 TTL 需在 1 到 8760 小时之间','err');return}
   const maxSessions=Number(qs('#setMaxSessions')?.value)||0;
   if(maxSessions<1||maxSessions>100000){toast('最大会话数需在 1 到 100000 之间','err');return}
-  const targets=probeTargetList();
-  if(!targets.length){toast('至少填写一个探测目标','err');return}
-  const invalid=targets.find(t=>/\s/.test(t)||t.length>200);
-  if(invalid){toast(`探测目标不合法：${invalid}`,'err');return}
   const stickyPort=Number(qs('#setStickyPort')?.value)||0;
   if(stickyPort<0||stickyPort>65535){toast('粘性端口需在 0 到 65535 之间','err');return}
   const body={
     mode:qs('#setMode').value,
     external_ip:qs('#setExternal').value.trim(),
-    probe_targets:probeTargetList(),
-    probe_policy:qs('#setProbePolicy')?.value||'any',
     skip_cert_verify:qs('#setSkip').checked,
     listener:{address:qs('#setListenAddr').value.trim(),port:Number(qs('#setListenPort').value)||0,username:(qs('#setListenUser')?.value||'').trim(),password:qs('#setListenPass')?.value||''},
     multi_port:{address:qs('#setMultiAddr').value.trim(),base_port:Number(qs('#setMultiPort').value)||0,username:qs('#setMultiUser').value,password:qs('#setMultiPass').value},
@@ -633,4 +628,37 @@ async function saveAutoRefresh(){
   if(!verificationPolicyValid(policy))return;
   const body=subscriptionConfigPayload({enabled:qs('#subEnabled').checked,interval:subscriptionInterval(),refresh:false});
   try{S.subConfig=await api('/api/subscription/config',{method:'PUT',body:JSON.stringify(body)});toast('订阅自动刷新设置已保存');renderSettings()}catch(err){toast(err.message,'err')}
+}
+
+// 订阅源自定义：每条订阅可单独设置客户端 UA 与额外请求头（Referer 等）。
+function subSourceEditorHTML(){
+  const sources=(S.settings&&S.settings.subscription_sources)||[];
+  const urls=(S.subConfig&&S.subConfig.subscriptions)||[];
+  const rows=urls.length?urls.map((url,index)=>{
+    const cfg=sources.find(item=>item.url===url)||{};
+    return `<div class="sub-source-row">
+      <div class="muted" title="${esc(url)}">${esc(url.slice(0,60))}</div>
+      <input class="ua" data-sub-ua="${index}" value="${esc(cfg.user_agent||'')}" placeholder="客户端 UA（留空自动尝试）">
+      <input class="referer" data-sub-referer="${index}" value="${esc((cfg.headers&&cfg.headers['Referer'])||'')}" placeholder="Referer（可选）">
+    </div>`;
+  }).join(''):'<div class="empty">还没有订阅链接</div>';
+  return `<div class="sub-source-editor"><div class="row" style="gap:8px;align-items:center"><strong>订阅源自定义</strong><span class="muted">每个订阅可单独指定 UA / Referer，拉取时优先使用</span></div>${rows}
+    <div class="settings-actions"><button class="btn small secondary" type="button" onclick="saveSubSources()">保存订阅源配置</button></div></div>`;
+}
+async function saveSubSources(){
+  const urls=(S.subConfig&&S.subConfig.subscriptions)||[];
+  const next=[];
+  urls.forEach((url,index)=>{
+    const ua=(document.querySelector('[data-sub-ua="'+index+'"]')?.value||'').trim();
+    const referer=(document.querySelector('[data-sub-referer="'+index+'"]')?.value||'').trim();
+    const entry={url};
+    if(ua)entry.user_agent=ua;
+    if(referer)entry.headers={Referer:referer};
+    if(ua||referer)next.push(entry);
+  });
+  try{
+    await api('/api/settings',{method:'PUT',body:JSON.stringify({subscription_sources:next})});
+    toast('订阅源配置已保存');
+    await loadSettings();await refresh();
+  }catch(err){toast(err.message,'err')}
 }

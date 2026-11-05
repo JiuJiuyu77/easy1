@@ -142,6 +142,39 @@ func (s *Service) ProbeSchedulerStats() ProbeSchedulerStats {
 	return s.tester.ProbeSchedulerStats()
 }
 
+var (
+	subscriptionSourcesMu sync.RWMutex
+	subscriptionSources   map[string]config.SubscriptionSource
+)
+
+// SetSubscriptionSources installs per-URL fetch identities (UA/headers) used by
+// subscription refresh and imports.
+func SetSubscriptionSources(sources []config.SubscriptionSource) {
+	next := make(map[string]config.SubscriptionSource, len(sources))
+	for _, source := range sources {
+		url := strings.TrimSpace(source.URL)
+		if url == "" {
+			continue
+		}
+		next[url] = source
+	}
+	subscriptionSourcesMu.Lock()
+	subscriptionSources = next
+	subscriptionSourcesMu.Unlock()
+}
+
+func subscriptionSourceFor(rawURL string) (config.SubscriptionSource, bool) {
+	subscriptionSourcesMu.RLock()
+	defer subscriptionSourcesMu.RUnlock()
+	source, ok := subscriptionSources[strings.TrimSpace(rawURL)]
+	return source, ok
+}
+
+// SetCustomSites installs operator-defined site check targets immediately.
+func (s *Service) SetCustomSites(sites []config.CustomSite) {
+	SetCustomSites(sites)
+}
+
 // SetProbeTargets applies a new probe list/policy to node testing immediately.
 func (s *Service) SetProbeTargets(targets []string, policy string) {
 	if s.tester == nil {
@@ -2388,6 +2421,14 @@ func (s *Service) fetchImportSubscription(ctx context.Context, rawURL string, re
 		},
 	}
 	ref := NodeSourceRef{TagPrefix: req.TagPrefix, UserAgent: req.UserAgent, Headers: req.Headers}
+	if source, ok := subscriptionSourceFor(rawURL); ok {
+		if ref.UserAgent == "" {
+			ref.UserAgent = source.UserAgent
+		}
+		if len(ref.Headers) == 0 && len(source.Headers) > 0 {
+			ref.Headers = source.Headers
+		}
+	}
 	if ref.UserAgent == "" || len(ref.Headers) == 0 {
 		// Reuse the client identity that worked for this source before (this
 		// process), so refreshes keep working against stricter providers.

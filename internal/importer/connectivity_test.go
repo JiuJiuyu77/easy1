@@ -421,7 +421,7 @@ func TestConnectivityPortPreviewCountsEachStaleRouteOnce(t *testing.T) {
 		routes:  map[string]connectivityRoute{fingerprint: {node: node, tags: []string{"A"}, fingerprint: fingerprint}},
 		results: map[string]ConnectivityResult{},
 	}
-	for _, target := range connectivityTargets {
+	for _, target := range newAllTargets() {
 		state.results[connectivityResultKey(node.ID, target.ID)] = ConnectivityResult{
 			NodeID: node.ID, Tags: []string{"A"}, RouteFingerprint: fingerprint, TargetID: target.ID,
 		}
@@ -499,7 +499,7 @@ func TestConnectivityJobRetriesOnlyRecoverableFailures(t *testing.T) {
 		attempts <- attempt
 		timeouts <- timeout
 		if attempt == 1 {
-			for _, target := range connectivityTargets {
+			for _, target := range newAllTargets() {
 				events <- connectivityProbeEvent{nodeID: node.ID, result: ConnectivityResult{
 					NodeID: node.ID, TargetID: target.ID, Attempts: 1, Success: target.ID != "github",
 					FirstSuccess: target.ID != "github", Retryable: target.ID == "github",

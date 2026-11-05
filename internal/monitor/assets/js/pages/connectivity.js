@@ -16,7 +16,7 @@ function verificationPolicyHTML(scope,test204,targets,disabled=false){
   const selected=targets instanceof Set?targets:new Set(targets||[]);
   const count=selected.size+(test204?1:0);
   const probeButton=`<button type="button" class="site-selector ${test204?'selected':''}" aria-pressed="${test204?'true':'false'}" ${disabled?'disabled':''} onclick="setVerification204('${scope}',${test204?'false':'true'})"><strong>探测目标</strong><span>${test204?'必须成功':'不检测'}</span></button>`;
-  const siteButtons=VERIFICATION_TARGETS.map(target=>`<button type="button" class="site-selector ${selected.has(target.id)?'selected':''}" aria-pressed="${selected.has(target.id)?'true':'false'}" ${disabled?'disabled':''} onclick="toggleVerificationTarget('${scope}','${target.id}')"><strong>${target.name}</strong><span>${selected.has(target.id)?'必须成功':'不检测'}</span></button>`).join('');
+  const siteButtons=verificationTargets().map(target=>`<button type="button" class="site-selector ${selected.has(target.id)?'selected':''}" aria-pressed="${selected.has(target.id)?'true':'false'}" ${disabled?'disabled':''} onclick="toggleVerificationTarget('${scope}','${target.id}')"><strong>${target.name}</strong><span>${selected.has(target.id)?'必须成功':'不检测'}</span></button>`).join('');
   return `<div class="verification-policy"><div class="verification-policy-head"><div><strong>节点可用条件</strong><span>探测目标取自设置（${(S.settings?.management?.probe_targets||[]).length||1} 个，${S.settings?.management?.probe_policy==='all'?'全部通过':'任一通过'}）· 站点为附加条件</span></div><span class="pill ${count?'green':'red'}">${count?`已选择 ${count} 项`:'未选择'}</span></div><div class="verification-targets">${probeButton}${siteButtons}</div><p class="muted">探测已忽略目标证书，但站点验收（GitHub/Google）对被限速或被劫持的机场线路仍容易误判，建议以探测目标为主、站点按需勾选。探测目标与判定方式：导入页在顶部「探测配置」，订阅刷新在其下方「探测配置」，设置页基础运行区也有同一份配置。</p></div>`;
 }
 function verificationPolicy(scope){
@@ -39,7 +39,7 @@ function setVerification204(scope,enabled){
   renderSettings();
 }
 function toggleVerificationTarget(scope,targetID){
-  if(!VERIFICATION_TARGETS.some(target=>target.id===targetID))return;
+  if(!verificationTargets().some(target=>target.id===targetID))return;
   if(scope==='import'){
     if(S.importSiteTargets.has(targetID))S.importSiteTargets.delete(targetID);else S.importSiteTargets.add(targetID);
     localStorage.setItem(IMPORT_SITE_TARGETS_KEY,JSON.stringify([...S.importSiteTargets]));
@@ -78,7 +78,7 @@ function renderConnectivity(){
   const running=S.connectivityJob?.status==='running';
   const timeoutValue=running?(Number(S.connectivityJob?.timeout_seconds)||CONNECTIVITY_DEFAULT_TIMEOUT_SECONDS):S.connectivityTimeoutInput;
   const sites=(scopes.targets||[]).map(target=>`<button class="site-selector ${S.connectivityTestTargets.has(target.id)?'selected':''}" ${running?'disabled':''} onclick="toggleConnectivityTestTarget('${esc(target.id)}')" title="${esc(target.url||'')}"><strong>${esc(target.name)}</strong><span>${S.connectivityTestTargets.has(target.id)?'本轮检测':'不检测'}</span></button>`).join('');
-  qs('#view').innerHTML=`<div class="connectivity-layout">
+  qs('#view').innerHTML=`${customSitesHTML()}<div class="connectivity-layout">
     <section class="settings-section"><div class="settings-section-head connectivity-scope-head"><h2>检测范围</h2><div class="row"><button class="btn small secondary" onclick="setAllConnectivityTags(true)">全选</button><button class="btn small ghost" onclick="setAllConnectivityTags(false)">清空</button></div></div><div class="settings-section-body"><div class="connectivity-scope-summary"><span>已选 <strong id="connectivityTagCount">${S.connectivitySelectedTags.size}</strong> / ${esc((scopes.tags||[]).length)} 个 Tag</span><span>共 ${esc((scopes.tags||[]).reduce((sum,item)=>sum+(Number(item.nodes)||0),0))} 个节点</span></div><div class="tag-picker">${tagRows||'<div class="connectivity-idle" style="grid-column:1/-1"><span>暂无带 Tag 的节点</span></div>'}</div><div class="connectivity-scope-footer"><div class="connectivity-test-controls"><div class="site-strip">${sites}</div><div class="connectivity-timeout-field"><label for="connectivityTimeout">单次超时</label><div class="number-suffix"><input id="connectivityTimeout" type="number" min="1" max="60" step="1" value="${esc(timeoutValue)}" ${running?'disabled':''} aria-describedby="connectivityTimeoutError" aria-invalid="${S.connectivityTimeoutValid?'false':'true'}" oninput="setConnectivityTimeout(this.value)"><span>秒</span></div><small id="connectivityTimeoutError" class="field-error" aria-live="polite">${S.connectivityTimeoutValid?'':'请输入 1-60 秒的整数'}</small></div></div><div id="connectivityActions" class="row">${connectivityActionsHTML()}</div></div></div></section>
     <section id="connectivityProgressHost"></section>
     <section id="connectivityCriteria"></section>
@@ -338,13 +338,60 @@ function probeTargetsEditorHTML(scope){
       <button class="btn small secondary" type="button" onclick="saveProbeTargets('${scope}')">保存探测配置</button>
     </div></div>`;
 }
+
+// 全局入口：任何页面都能打开探测配置（目标 + 判定方式）。
+function openProbeConfig(){
+  openDialog('探测配置', `<p class="muted">探测、手动测速、自动测速（导入验收/订阅刷新）共用这份配置；每行一个目标，返回 2xx 即算通过。</p>${probeTargetsEditorHTML('global')}`);
+}
 async function saveProbeTargets(scope){
   const targets=(qs('#probeTargets_'+scope)?.value||'').split('\n').map(v=>v.trim()).filter(Boolean);
   if(!targets.length){toast('至少填写一个探测目标','err');return}
   const policy=qs('#probePolicy_'+scope)?.value||'any';
   try{
     await api('/api/settings',{method:'PUT',body:JSON.stringify({probe_targets:targets,probe_policy:policy})});
-    toast('探测配置已保存，下一次测速立即生效');
+    toast('探测配置已保存，下一次测速/探测立即生效');
+    qs('#resultModal')?.classList.remove('show');
     await refresh();
   }catch(err){toast(err.message,'err')}
+}
+
+// 站点按钮 = 内置 + 运维自定义
+function verificationTargets(){
+  const custom=((S.settings&&S.settings.verification&&S.settings.verification.custom_sites)||[]).map(site=>({id:site.id,name:site.name||site.id,custom:true}));
+  return [...VERIFICATION_TARGETS,...custom];
+}
+function customSitesHTML(){
+  const sites=(S.settings?.verification?.custom_sites)||[];
+  const rows=sites.length?sites.map(site=>`<div class="table-row" style="grid-template-columns:1fr 1.6fr 1fr auto"><span>${esc(site.name||site.id)}</span><span class="muted">${esc(site.url)}</span><span class="muted">${esc(site.marker||'-')}</span><span class="row-actions"><button class="btn small danger" type="button" onclick="removeCustomSite('${esc(site.id)}')">删除</button></span></div>`).join(''):'<div class="empty">还没有自定义站点</div>';
+  return `<div class="card"><div class="card-head"><div><h2>自定义站点</h2><p class="muted">保存后会出现在「站点检测」和「节点可用条件」里；marker 是响应体必须包含的关键字，可留空（只校验 2xx）。</p></div></div>
+    <div class="card-body stack">${rows}
+      <div class="settings-form">
+        <div class="field"><label>名称</label><input id="customSiteName" placeholder="例如 我的站点"></div>
+        <div class="field"><label>URL</label><input id="customSiteURL" placeholder="https://example.com/"></div>
+        <div class="field"><label>marker（可选）</label><input id="customSiteMarker" placeholder="响应需包含的关键字"></div>
+      </div>
+      <div class="settings-actions"><button class="btn secondary" type="button" onclick="addCustomSite()">添加自定义站点</button></div>
+    </div></div>`;
+}
+async function saveCustomSites(list){
+  await api('/api/settings',{method:'PUT',body:JSON.stringify({verification:{custom_sites:list}})});
+  toast('自定义站点已保存');
+  await loadSettings();
+  await refresh();
+}
+function addCustomSite(){
+  const name=(qs('#customSiteName')?.value||'').trim();
+  const url=(qs('#customSiteURL')?.value||'').trim();
+  const marker=(qs('#customSiteMarker')?.value||'').trim();
+  if(!url){toast('请填写站点 URL','err');return}
+  const id=(name||url).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,24);
+  const list=[...((S.settings?.verification?.custom_sites)||[])];
+  const finalID=id||('site'+Date.now().toString(36));
+  if(list.some(site=>site.id===finalID)){toast('该站点已存在','err');return}
+  list.push({id:finalID,name:name||finalID,url,marker});
+  saveCustomSites(list).catch(err=>toast(err.message,'err'));
+}
+function removeCustomSite(id){
+  const list=((S.settings?.verification?.custom_sites)||[]).filter(site=>site.id!==id);
+  saveCustomSites(list).catch(err=>toast(err.message,'err'));
 }

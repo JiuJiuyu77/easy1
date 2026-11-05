@@ -255,11 +255,12 @@ type ChainProfileMutationRequest struct {
 }
 
 type ConnectivityTarget struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Host string `json:"host"`
-	Port uint16 `json:"port"`
-	URL  string `json:"url"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Host   string `json:"host"`
+	Port   uint16 `json:"port"`
+	URL    string `json:"url"`
+	Custom bool   `json:"custom,omitempty"`
 }
 
 type ConnectivityTagScope struct {

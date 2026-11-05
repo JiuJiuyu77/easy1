@@ -1164,6 +1164,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				"probe_targets":     append([]string(nil), cfg.Management.ProbeTargets...),
 				"probe_policy":      cfg.ProbePolicyOrDefault(),
 			}
+			resp["subscription_sources"] = append([]config.SubscriptionSource(nil), cfg.SubSources...)
+			resp["verification"] = map[string]any{
+				"custom_sites": append([]config.CustomSite(nil), cfg.Verification.CustomSites...),
+			}
 			resp["dns"] = map[string]any{
 				"server":           cfg.DNS.Server,
 				"port":             cfg.DNS.Port,
@@ -1213,6 +1217,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				SessionTTL     *string `json:"session_ttl"`
 				MaxSessions    *int    `json:"max_sessions"`
 			} `json:"sticky,omitempty"`
+			SubscriptionSources *[]config.SubscriptionSource `json:"subscription_sources,omitempty"`
+			Verification        *struct {
+				CustomSites []config.CustomSite `json:"custom_sites"`
+			} `json:"verification,omitempty"`
 			DNS *struct {
 				Server          string   `json:"server"`
 				Port            int      `json:"port"`
@@ -1377,6 +1385,13 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				candidate.Sticky.MaxSessions = *req.Sticky.MaxSessions
 			}
 		}
+		if req.SubscriptionSources != nil {
+			candidate.SubSources = *req.SubscriptionSources
+		}
+		if req.Verification != nil {
+			candidate.Verification.CustomSites = req.Verification.CustomSites
+			candidate.NormalizeVerification()
+		}
 		if req.DNS != nil {
 			candidate.DNS.Server = strings.TrimSpace(req.DNS.Server)
 			candidate.DNS.Port = req.DNS.Port
@@ -1461,6 +1476,8 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		s.cfgSrc.Log = candidate.Log
 		s.cfgSrc.GeoIP = candidate.GeoIP
 		s.cfgSrc.DNS = candidate.DNS
+		s.cfgSrc.Verification = candidate.Verification
+		s.cfgSrc.SubSources = candidate.SubSources
 		s.cfgSrc.Mode = candidate.Mode
 		s.cfgSrc.Listener = candidate.Listener
 		s.cfgSrc.MultiPort = candidate.MultiPort
@@ -1481,6 +1498,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if svc := s.importService(); svc != nil {
 			svc.SetProbeTargets(candidate.Management.ProbeTargets, candidate.ProbePolicyOrDefault())
+			svc.SetCustomSites(candidate.Verification.CustomSites)
 		}
 
 		writeJSON(w, map[string]any{
