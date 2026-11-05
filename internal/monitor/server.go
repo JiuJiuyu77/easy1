@@ -374,8 +374,15 @@ func (s *Server) Start(ctx context.Context) {
 		}
 		listener, err := net.Listen("tcp", s.srv.Addr)
 		if err != nil {
-			s.logger.Printf("❌ Monitor server error: %v", err)
-			return
+			// The management port being taken must not lock the operator out:
+			// try the next few ports and say where we ended up.
+			if fallback, fallbackErr := listenNextFreePort(s.srv.Addr, 20); fallbackErr == nil {
+				s.logger.Printf("⚠️  %s 被占用（%v），管理端改用 %s", s.srv.Addr, err, fallback.Addr())
+				listener = fallback
+			} else {
+				s.logger.Printf("❌ Monitor server error: %v", err)
+				return
+			}
 		}
 		s.logger.Printf("✅ Monitor server started on http://%s", listener.Addr())
 		go s.cleanupExpiredSessions()
@@ -2061,4 +2068,29 @@ func (s *Server) cleanupExpiredSessions() {
 func secureCompareStrings(a, b string) bool {
 	aHash, bHash := sha256.Sum256([]byte(a)), sha256.Sum256([]byte(b))
 	return subtle.ConstantTimeCompare(aHash[:], bHash[:]) == 1
+}
+
+// listenNextFreePort binds the configured address, then address+1..address+n.
+func listenNextFreePort(address string, attempts int) (net.Listener, error) {
+	host, portText, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	port, convErr := strconv.Atoi(portText)
+	if convErr != nil || port <= 0 {
+		return nil, convErr
+	}
+	var lastErr error
+	for offset := 1; offset <= attempts && port+offset <= 65535; offset++ {
+		candidate := net.JoinHostPort(host, strconv.Itoa(port+offset))
+		listener, listenErr := net.Listen("tcp", candidate)
+		if listenErr == nil {
+			return listener, nil
+		}
+		lastErr = listenErr
+	}
+	if lastErr == nil {
+		lastErr = err
+	}
+	return nil, lastErr
 }

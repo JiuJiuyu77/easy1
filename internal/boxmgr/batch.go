@@ -50,6 +50,9 @@ func (m *Manager) Diagnostics() map[string]any {
 	m.mu.RUnlock()
 
 	result := map[string]any{"running": running}
+	if failure := m.StartFailure(); failure != "" && !running {
+		result["start_failure"] = failure
+	}
 	if cfgCopy == nil {
 		return result
 	}

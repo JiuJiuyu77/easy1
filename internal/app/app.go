@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,6 +22,42 @@ import (
 )
 
 // Run builds the runtime components from config and blocks until shutdown.
+// retryStartCore retries the initial start every 30s until it succeeds or the
+// process stops. This turns a port conflict from "restart the container" into
+// "release the port and wait".
+func retryStartCore(ctx context.Context, boxMgr *boxmgr.Manager) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for attempt := 1; attempt <= 40; attempt++ {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		if err := boxMgr.Start(ctx); err != nil {
+			if attempt%4 == 0 {
+				fmt.Printf("⚠️  代理核心仍未启动（第 %d 次重试）：%v\n", attempt, err)
+			}
+			continue
+		}
+		boxMgr.ClearStartFailure()
+		fmt.Println("✅ 代理核心已启动（端口恢复可用）")
+		return
+	}
+}
+
+// describePortConflict turns a bind error into a concrete next step.
+func describePortConflict(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := strings.ToLower(err.Error())
+	if !strings.Contains(message, "address already in use") && !strings.Contains(message, "bind") {
+		return ""
+	}
+	return "端口被占用：ss -lntp | grep <端口> 找到占用进程，或把 listener.port / multi_port.base_port 换到空闲端口段后重载"
+}
+
 func Run(ctx context.Context, cfg *config.Config) error {
 	if cfg == nil {
 		return errors.New("application requires config")
@@ -162,9 +199,22 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		fmt.Println("No pool nodes configured; WebUI is available for importing nodes.")
 	} else {
 		if err := boxMgr.Start(ctx); err != nil {
-			return fmt.Errorf("start box manager: %w", err)
+			// A bind failure (another process owns the entry port) used to exit
+			// the process, which with `restart: unless-stopped` means an endless
+			// crash loop and no way in. Stay up with the management UI only so
+			// the port can be changed from the browser.
+			boxMgr.ReportStartFailure(err)
+			fmt.Printf("⚠️  代理核心启动失败：%v\n", err)
+			fmt.Printf("⚠️  管理界面仍可用（%s），请在其中修改端口或释放占用后点「重载核心」。\n", cfg.Management.Listen)
+			if portErr := describePortConflict(err); portErr != "" {
+				fmt.Printf("⚠️  %s\n", portErr)
+			}
+			// Keep trying in the background: once the conflicting process is
+			// gone the core comes up without restarting the container.
+			go retryStartCore(ctx, boxMgr)
+		} else {
+			coreStarted = true
 		}
-		coreStarted = true
 	}
 	boxMgr.SetStartupTimings(map[string]int64{
 		"monitor":     monitorDuration.Milliseconds(),

@@ -88,6 +88,7 @@ type Manager struct {
 	baseCancel         context.CancelFunc
 	closed             bool
 	healthCheckStarted bool
+	startFailure       string
 
 	// portIndex caches node key → local port for the ports API, and
 	// startupTimings carries per-stage startup durations to the diagnostics API.
@@ -128,6 +129,31 @@ func (m *Manager) adoptConfigLocked(next *config.Config) {
 		return
 	}
 	m.cfg = next
+}
+
+// ReportStartFailure records why the core could not start, so the UI can show it
+// even when the process stays up with only the management server running.
+func (m *Manager) ReportStartFailure(err error) {
+	if err == nil {
+		return
+	}
+	m.mu.Lock()
+	m.startFailure = err.Error()
+	m.mu.Unlock()
+}
+
+// ClearStartFailure drops a recorded startup error once the core runs again.
+func (m *Manager) ClearStartFailure() {
+	m.mu.Lock()
+	m.startFailure = ""
+	m.mu.Unlock()
+}
+
+// StartFailure returns the recorded startup error, if any.
+func (m *Manager) StartFailure() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.startFailure
 }
 
 // Start creates and starts the initial sing-box instance.

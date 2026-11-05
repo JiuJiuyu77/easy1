@@ -205,6 +205,14 @@ function renderBlacklistCard(){
         <span class="row-actions"><button class="btn small green" type="button" onclick="releaseDebugNode('${esc(n.tag)}')">解封</button></span>
       </div>`).join(''):'<div class="empty">没有被拉黑的节点</div>'}</div></div>`;
 }
+function startFailureBanner(){
+  const failure=S.diagnostics?.runtime?.start_failure||'';
+  if(!failure)return '';
+  return `<div class="card"><div class="card-head"><h2>代理核心未启动</h2></div><div class="card-body stack">
+    <p class="action-status err">${esc(failure)}</p>
+    <p class="muted">常见原因：入口端口被其它程序占用（<code>ss -lntp | grep &lt;端口&gt;</code>），或端口段与容器映射不符。修改「端口与监听」后点「保存运行设置并重载」即可恢复，无需重启容器。</p>
+  </div></div>`;
+}
 function renderDashboardExtras(){
   const host=qs('#view');
   if(!host)return;
@@ -226,6 +234,11 @@ function renderDashboardExtras(){
           <button class="btn small secondary" type="button" onclick="copyPoolEntry('curl')">复制 curl</button>
         </div></div></div>`;
   host.appendChild(wrap);
+  if(startFailureBanner()){
+    const warn=document.createElement('div');
+    warn.innerHTML=startFailureBanner();
+    host.insertBefore(warn.firstElementChild, host.firstChild);
+  }
   const holder=document.createElement('div');
   holder.innerHTML=renderBlacklistCard();
   host.appendChild(holder.firstElementChild);
