@@ -117,6 +117,7 @@ management:
   #               all = 全部通过才算可用（更严格）
   probe_targets:
     - https://www.gstatic.com/generate_204
+    - https://cp.cloudflare.com/generate_204
     - https://www.github.com/
   probe_policy: any
   probe_target: https://www.gstatic.com/generate_204   # 兼容旧字段：等于 probe_targets 的第一项

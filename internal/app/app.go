@@ -125,6 +125,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	testerOptions := []importer.TesterOption{
 		importer.WithProbeTarget(cfg.Management.ProbeTarget),
+		importer.WithProbeTargets(cfg.Management.ProbeTargets, cfg.ProbePolicyOrDefault()),
 		importer.WithTesterTimeout(cfg.SubscriptionRefresh.HealthCheckTimeout),
 		importer.WithSkipCertVerify(cfg.SkipCertVerify),
 		importer.WithChainProfiles(cfg.ChainProfiles),

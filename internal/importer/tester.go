@@ -76,6 +76,8 @@ func retryableProbeFailure(err error) bool {
 
 type NodeTester struct {
 	probeTarget          string
+	probeTargets         []string
+	probePolicy          string
 	ipinfoURL            string
 	timeout              time.Duration
 	concurrency          int
@@ -174,6 +176,26 @@ func WithProbeTarget(target string) TesterOption {
 	return func(t *NodeTester) {
 		if target != "" {
 			t.probeTarget = target
+		}
+	}
+}
+
+// WithProbeTargets configures the ordered reachability checks used by node
+// tests. policy "all" requires every target to answer, anything else treats one
+// answering target as success.
+func WithProbeTargets(targets []string, policy string) TesterOption {
+	return func(t *NodeTester) {
+		cleaned := make([]string, 0, len(targets))
+		for _, raw := range targets {
+			if value := strings.TrimSpace(raw); value != "" {
+				cleaned = append(cleaned, value)
+			}
+		}
+		if len(cleaned) > 0 {
+			t.probeTargets = cleaned
+		}
+		if strings.TrimSpace(policy) != "" {
+			t.probePolicy = policy
 		}
 	}
 }
@@ -988,7 +1010,62 @@ func startProxyBox(ctx context.Context, outboundTag string, outbound option.Outb
 }
 
 func (t *NodeTester) probe(ctx context.Context, client *http.Client) error {
-	return t.probeTargetURL(ctx, client, t.probeTarget)
+	targets := t.effectiveProbeTargets()
+	return evaluateProbePolicy(targets, t.probePolicy, func(probeCtx context.Context, target string) error {
+		return t.probeTargetURL(probeCtx, client, target)
+	}, ctx)
+}
+
+// effectiveProbeTargets returns the configured list, or the legacy single target.
+func (t *NodeTester) effectiveProbeTargets() []string {
+	if len(t.probeTargets) > 0 {
+		return t.probeTargets
+	}
+	if strings.TrimSpace(t.probeTarget) != "" {
+		return []string{t.probeTarget}
+	}
+	return nil
+}
+
+// evaluateProbePolicy runs one probe per target. With policy "all" every target
+// must answer; otherwise the first success wins. It reports the most useful
+// error when nothing passes.
+func evaluateProbePolicy(targets []string, policy string, probe func(context.Context, string) error, ctx context.Context) error {
+	if len(targets) == 0 {
+		return errors.New("没有配置探测目标")
+	}
+	requireAll := strings.EqualFold(strings.TrimSpace(policy), "all")
+	var firstErr error
+	passed := 0
+	for _, target := range targets {
+		err := probe(ctx, target)
+		if err == nil {
+			passed++
+			if !requireAll {
+				return nil
+			}
+			continue
+		}
+		if firstErr == nil {
+			firstErr = fmt.Errorf("%s: %w", target, err)
+		}
+		if requireAll {
+			return firstErr
+		}
+		if ctx.Err() != nil {
+			return firstErr
+		}
+	}
+	if requireAll && passed == len(targets) {
+		return nil
+	}
+	if firstErr != nil {
+		if len(targets) > 1 {
+			return fmt.Errorf("%w（%d 个探测目标全部失败）", firstErr, len(targets))
+		}
+		return firstErr
+	}
+	return errors.New("探测失败")
 }
 
 func (t *NodeTester) probeTargetURL(ctx context.Context, client *http.Client, target string) error {
@@ -1006,8 +1083,10 @@ func (t *NodeTester) probeTargetURL(ctx context.Context, client *http.Client, ta
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("probe got HTTP %d, expected 204", resp.StatusCode)
+	// 204 endpoints are the classic probe, but custom targets may answer 200
+	// (or another 2xx). Anything else means the request did not reach the site.
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("probe got HTTP %d, expected 2xx", resp.StatusCode)
 	}
 	return nil
 }
@@ -1057,7 +1136,13 @@ func normalizeProbeURL(target string) (string, error) {
 	}
 
 	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-		target = "http://" + target
+		// Plain HTTP on port 80 is the first thing middleboxes rewrite or rate
+		// limit, so default to TLS unless the caller explicitly asked for :80.
+		if strings.HasSuffix(target, ":80") {
+			target = "http://" + target
+		} else {
+			target = "https://" + target
+		}
 	}
 
 	u, err := url.Parse(target)
@@ -1067,10 +1152,17 @@ func normalizeProbeURL(target string) (string, error) {
 	if u.Host == "" {
 		return "", fmt.Errorf("invalid probe target %q", target)
 	}
-	if u.Path == "" || u.Path == "/" {
+	// Only the known generate_204 endpoints get the implicit path; custom URLs
+	// keep "/" (a GitHub target would 404 on /generate_204).
+	if (u.Path == "" || u.Path == "/") && isGenerate204Host(u.Hostname()) {
 		u.Path = "/generate_204"
 	}
 	return u.String(), nil
+}
+
+func isGenerate204Host(host string) bool {
+	host = strings.ToLower(host)
+	return strings.Contains(host, "gstatic.com") || strings.Contains(host, "cloudflare.com")
 }
 
 func (t *NodeTester) lookupIPInfo(ctx context.Context, client *http.Client) (string, string, error) {

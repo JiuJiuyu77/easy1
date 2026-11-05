@@ -26,8 +26,11 @@ func TestNormalizeProbeURL(t *testing.T) {
 		want   string
 	}{
 		{name: "empty default", target: "", want: "https://www.gstatic.com/generate_204"},
-		{name: "host port", target: "www.apple.com:80", want: "http://www.apple.com:80/generate_204"},
-		{name: "host only", target: "cp.cloudflare.com", want: "http://cp.cloudflare.com/generate_204"},
+		// Plain :80 keeps HTTP and no implicit path; only generate_204 hosts get one.
+		{name: "host port", target: "www.apple.com:80", want: "http://www.apple.com:80"},
+		// Bare hosts default to TLS: port 80 is what middleboxes rate limit.
+		{name: "host only", target: "cp.cloudflare.com", want: "https://cp.cloudflare.com/generate_204"},
+		{name: "custom page", target: "https://www.github.com/", want: "https://www.github.com/"},
 		{name: "http full path", target: "http://cp.cloudflare.com/generate_204", want: "http://cp.cloudflare.com/generate_204"},
 		{name: "https full path", target: "https://cp.cloudflare.com/generate_204", want: "https://cp.cloudflare.com/generate_204"},
 	}

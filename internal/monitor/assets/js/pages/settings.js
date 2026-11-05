@@ -196,7 +196,7 @@ function renderSettings(){
                 <button class="btn small ghost" type="button" onclick="addProbeTarget('https://www.gstatic.com/generate_204')">+ gstatic 204</button>
                 <button class="btn small ghost" type="button" onclick="addProbeTarget('https://cp.cloudflare.com/generate_204')">+ cloudflare 204</button>
                 <button class="btn small ghost" type="button" onclick="addProbeTarget('https://www.github.com/')">+ GitHub</button>
-                <button class="btn small ghost" type="button" onclick="addProbeTarget('www.apple.com:80')">+ Apple:80</button>
+                <button class="btn small ghost" type="button" onclick="addProbeTarget('https://www.apple.com/')">+ Apple</button>
               </div>
             </div>
             <div class="field"><label>判定方式</label><select id="setProbePolicy"><option value="any">任一通过即算可用</option><option value="all">全部通过才算可用</option></select></div>

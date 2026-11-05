@@ -270,6 +270,7 @@ type SubscriptionRefreshConfig struct {
 // DefaultProbeTargets are used when neither probe_target nor probe_targets is set.
 var DefaultProbeTargets = []string{
 	"https://www.gstatic.com/generate_204",
+	"https://cp.cloudflare.com/generate_204",
 	"https://www.github.com/",
 }
 
