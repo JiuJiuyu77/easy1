@@ -339,6 +339,21 @@ function probeTargetsEditorHTML(scope){
     </div></div>`;
 }
 
+// 统一摘要：各页面只展示当前配置并提供「编辑」按钮，编辑器只有顶栏弹窗一处。
+function probeConfigSummaryHTML(){
+  const mgmt=(S.settings&&S.settings.management)||{};
+  const targets=(Array.isArray(mgmt.probe_targets)&&mgmt.probe_targets.length)?mgmt.probe_targets:['https://www.gstatic.com/generate_204'];
+  const policy=mgmt.probe_policy==='all'?'全部通过才算可用':'任一通过即算可用';
+  return `<div class="probe-summary">
+    <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+      <span class="pill green">${targets.length} 个探测目标</span>
+      <span class="pill">${policy}</span>
+      <button class="btn small secondary" type="button" onclick="openProbeConfig()">编辑探测配置</button>
+    </div>
+    <p class="muted">${esc(targets.join(' · '))}</p>
+  </div>`;
+}
+
 // 全局入口：任何页面都能打开探测配置（目标 + 判定方式）。
 function openProbeConfig(){
   openDialog('探测配置', `<p class="muted">探测、手动测速、自动测速（导入验收/订阅刷新）共用这份配置；每行一个目标，返回 2xx 即算通过。</p>${probeTargetsEditorHTML('global')}`);

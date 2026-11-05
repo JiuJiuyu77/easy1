@@ -48,6 +48,17 @@ function renderDiagnostics(){
     </div>
   </div>
   <div class="card">
+    <div class="card-head"><div><h2>SNI 探测</h2><p class="muted">同一 SNI 打两跳：面板进程直连 / 经面板池口 CONNECT。用于判断 RST 发生在哪一跳。</p></div></div>
+    <div class="card-body stack">
+      <div class="settings-form">
+        <div class="field"><label>目标（host 或 host:port）</label><input id="sniTarget" placeholder="www.example.com"></div>
+        <div class="field"><label>SNI（留空=目标 host）</label><input id="sniName" placeholder="www.example.com"></div>
+      </div>
+      <div class="settings-actions"><button class="btn secondary" type="button" onclick="runSNIProbe()">开始探测</button></div>
+      <div id="sniResult" class="sni-result"></div>
+    </div>
+  </div>
+  <div class="card">
     <div class="card-head"><h2>运行时</h2></div>
     <div class="card-body"><div class="kv-grid">
       <div><span>代理核心</span><strong class="${runtime.running?'ok':'bad'}">${runtime.running?'运行中':'未运行'}</strong></div>
@@ -69,4 +80,24 @@ async function releaseDebugNode(tag){
 async function blacklistDebugNode(tag){
   if(!confirm(`拉黑节点「${tag}」？该节点会立即停止被调度，直到手动解封或冷却结束。`))return;
   try{await api('/api/nodes/'+encodeURIComponent(tag)+'/blacklist',{method:'POST'});toast('已拉黑');await refresh()}catch(err){toast(err.message,'err')}
+}
+
+async function runSNIProbe(){
+  const target=(qs('#sniTarget')?.value||'').trim();
+  const sni=(qs('#sniName')?.value||'').trim();
+  const host=qs('#sniResult');
+  if(!target){toast('请填写目标','err');return}
+  if(host)host.innerHTML='<p class="muted">探测中…</p>';
+  try{
+    const params=new URLSearchParams({target});
+    if(sni)params.set('sni',sni);
+    const r=await api('/api/probes/sni?'+params.toString());
+    const row=(label,hop)=>`<div class="table-row" style="grid-template-columns:120px 90px 80px 1fr"><span>${esc(label)}</span>
+      <span class="pill ${hop&&hop.ok?'green':'red'}">${hop&&hop.ok?'成功':'失败'}</span>
+      <span class="muted">${hop&&hop.ms!=null?hop.ms+' ms':'—'}</span>
+      <span class="muted">${esc(hop&&hop.error?hop.error:(hop&&hop.peer?hop.peer:'-'))}</span></div>`;
+    if(host)host.innerHTML=`<div class="table">${row('进程直连',r.direct)}${row('经面板池口',r.via_panel)}</div>
+      <p class="action-status ${/未复现|均成功/.test(r.verdict||'')?'':'err'}">${esc(r.verdict||'')}</p>
+      <p class="muted">目标 ${esc(r.target||'')} · SNI ${esc(r.sni||'')}</p>`;
+  }catch(err){if(host)host.innerHTML=`<p class="action-status err">${esc(err.message)}</p>${err.status===0?'':''}`}
 }

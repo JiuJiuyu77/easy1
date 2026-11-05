@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **启动失败原因可见**：`/api/diagnostics` 的 `runtime.start_failure` 与仪表盘横幅展示原因与处理建议。
 
 ### Changed
+- **探测配置统一**：导入页 / 批量工具 / 设置「基础运行」三处改为同一块的「摘要 + 编辑探测配置」按钮，编辑器只在顶栏「探测配置」弹窗里一处；订阅刷新改为只读引用基础运行的那份配置（不再有自己的控件）。
+- **诊断页新增 SNI 探测**：输入目标与 SNI，直接看到「进程直连 / 经面板池口」两跳的成功、耗时、错误与结论，用于定位 RST 发生在哪一跳。
+
 - 前置代理的"测试连接"改为**经该链访问 GitHub**（`https://github.com/`，要求 2xx 且页面含 github 标记），与节点导入里的站点检测口径一致；此前用 generate_204 只能证明通了一个 204，无法说明链能承载真实流量。
 
 ### Added

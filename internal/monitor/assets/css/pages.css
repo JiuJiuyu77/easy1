@@ -313,3 +313,5 @@ pre.log-view{height:100%;max-height:none;background:#0f172a;color:#cbd5e1;border
 .sub-source-row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:center}
 .sub-source-row input{width:100%}
 @media(max-width:760px){.sub-source-row{grid-template-columns:1fr}}
+
+.sni-result .table-row{min-width:0}

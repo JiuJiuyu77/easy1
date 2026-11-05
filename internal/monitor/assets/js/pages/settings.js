@@ -193,6 +193,8 @@ function renderSettings(){
             <div class="field"><label>外部 IP</label><input id="setExternal" value="${esc(s.external_ip||'')}" placeholder="留空则使用当前访问地址"></div>
             <div class="field"><label>管理监听</label><input id="setMgmtListen" value="${esc(management.listen||'')}"></div>
             <div class="field"><label>探测并发</label><input id="setProbeConcurrency" type="number" min="1" max="1024" value="${esc(probeConcurrency)}"></div>
+          </div>
+          <div class="field wide"><label>探测目标与判定方式（测速与自动检测共用）</label>${probeConfigSummaryHTML()}
             <div class="field"><label>管理密码</label><input id="setMgmtPassword" type="password" autocomplete="new-password" placeholder="${hasMgmtPassword?'已设置，留空不修改':'未设置，留空则无需登录'}"></div>
             <label class="toggle-row wide"><input id="setClearMgmtPassword" type="checkbox" style="width:auto"><div><strong>清除管理密码</strong><span class="muted">勾选后保存即取消登录密码，任何拿到地址的人都能操作</span></div></label>
             <label class="toggle-row wide"><input id="setSkip" type="checkbox" ${s.skip_cert_verify?'checked':''} style="width:auto"><div><strong>跳过证书验证</strong></div></label>
@@ -323,7 +325,7 @@ function renderSettings(){
           </div>
           <button class="btn secondary block" onclick="saveAutoRefresh()">保存自动刷新设置</button>
           ${subSourceEditorHTML()}
-          ${probeTargetsEditorHTML('refresh')}
+          <p class="muted">刷新时沿用「基础运行」的探测配置：${probeTargets.length} 个目标 · ${probePolicy==='all'?'全部通过才算可用':'任一通过即算可用'}。需要修改请到基础运行区或顶栏「探测配置」。</p>
         </div>
       </section>
 
