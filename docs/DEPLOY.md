@@ -163,6 +163,20 @@ vless://<UUID>@<地址>:443?security=reality&pbk=<公钥>&sid=<短ID>&fp=chrome&
 
 App 走代理访问某个域名时被 `RST`，先用脚本判断是哪一跳断的：
 
+**首选：面板自带的探测接口**（零依赖，容器里没有 openssl/curl 也能用）：
+
+```bash
+# 同一个 SNI 打两跳：面板进程直连 + 经面板池口 CONNECT
+curl -s "http://127.0.0.1:9091/api/probes/sni?target=目标域名&sni=目标域名" | python3 -m json.tool
+# 指定目的 IP，观察"IP 可达但该 SNI 被重置"
+curl -s "http://127.0.0.1:9091/api/probes/sni?target=1.1.1.1&sni=目标域名"
+```
+
+返回 `direct` / `via_panel` 两跳的 `ok`、`ms`、`error` 和一句 `verdict`。有管理密码时加
+`-H "Authorization: Bearer <密码>"`（或先登录拿 Cookie）。
+
+**备选：脚本方式**（需要在 git 仓库目录里执行；部署目录若只有 compose 文件则没有该脚本）：
+
 ```bash
 sh scripts/sni_diag.sh <目标域名>            # 本机直连的 SNI 矩阵
 sh scripts/sni_diag.sh <目标域名> 2323       # 再经面板池口（CONNECT 隧道）

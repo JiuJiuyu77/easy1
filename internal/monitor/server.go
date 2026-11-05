@@ -172,6 +172,7 @@ func NewServer(cfg Config, mgr *Manager, logger *log.Logger) *Server {
 	mux.HandleFunc("/api/nodes/", s.withAuth(s.handleNodeAction))
 	mux.HandleFunc("/api/debug", s.withAuth(s.handleDebug))
 	mux.HandleFunc("/api/diagnostics", s.withAuth(s.handleDiagnostics))
+	mux.HandleFunc("/api/probes/sni", s.withAuth(s.handleSNIProbe))
 	mux.HandleFunc("/api/export", s.withAuth(s.handleExport))
 	mux.HandleFunc("/api/data-export/nodes", s.withAuth(s.handleDataExportNodes))
 	mux.HandleFunc("/api/data-export/subscriptions", s.withAuth(s.handleDataExportSubscriptions))
