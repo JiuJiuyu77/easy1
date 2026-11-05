@@ -72,12 +72,9 @@ var builtinConnectivityTargetSpecs = []connectivityTargetSpec{
 			{id: "auth", name: "Microsoft 登录", url: "https://login.microsoftonline.com/", allowedHosts: []string{"login.microsoftonline.com"}, marker: "microsoft"},
 		},
 	},
-	{
-		target: ConnectivityTarget{ID: "proxyspace", Name: "ProxySpace", Host: "dashboard.proxyscrape.com", Port: 443, URL: "https://dashboard.proxyscrape.com/"},
-		components: []connectivityComponentSpec{{
-			id: "page", name: "ProxyScrape 页面", url: "https://dashboard.proxyscrape.com/", allowedHosts: []string{"dashboard.proxyscrape.com"}, marker: "proxyscrape",
-		}},
-	},
+	// ProxySpace was dropped as a built-in check: it is a dashboard that often
+	// answers non-2xx or a JS shell through proxy exits, so it produced
+	// near-universal false failures. Operators can still add it as a custom site.
 }
 
 var (

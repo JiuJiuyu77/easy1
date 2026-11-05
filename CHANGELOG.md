@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`manager not started` 导致检测结果无法应用**：运行时未启动（首次启动失败，如端口被占用）时，`Reload` 直接报错并拒绝，导入/检测结果因此永远应用不上。现在未运行时重载会**就地采用新配置并尝试启动**，失败才返回真实原因。
+- **站点验收误杀大批节点**：移除内置 ProxySpace（走代理时多为非 2xx 或 JS 壳，造成近乎全量失败）；站点验收本身已改为可选，不勾选时只按探测目标判定。
+
 - **站点验收不再导致大批 TLS 失败**：站点探测（`newConnectivityHTTPClient`）此前用 `RootCAs` 严格校验目标证书，机场/中间设备重签 TLS 时几乎所有节点都被判失败；现在与节点探测一致，只判定可达性（仍记录 TLS 版本）。
 - **站点验收改为可选**：不再强制"至少选一项"，全不勾选时仅按探测目标判定。
 

@@ -265,7 +265,9 @@ func TestConnectivityScopesIncludeEveryOwningTag(t *testing.T) {
 		t.Fatal(err)
 	}
 	scopes := svc.ConnectivityScopes()
-	if len(scopes.Targets) != 4 || len(scopes.Tags) != 2 {
+	// Three built-in sites remain (ProxySpace was dropped: it answers non-2xx or
+	// a JS shell through proxy exits and caused near-universal false failures).
+	if len(scopes.Targets) != 3 || len(scopes.Tags) != 2 {
 		t.Fatalf("scopes = %#v", scopes)
 	}
 	counts := map[string]int{}
@@ -516,12 +518,12 @@ func TestConnectivityJobRetriesOnlyRecoverableFailures(t *testing.T) {
 		close(events)
 		return events
 	}
-	jobID, err := svc.StartConnectivityJob(ConnectivityStartRequest{Tags: []string{"A"}, Targets: []string{"google", "github", "outlook", "proxyspace"}, TimeoutSeconds: 23})
+	jobID, err := svc.StartConnectivityJob(ConnectivityStartRequest{Tags: []string{"A"}, Targets: []string{"google", "github", "outlook"}, TimeoutSeconds: 23})
 	if err != nil {
 		t.Fatal(err)
 	}
 	job := waitConnectivityJobTerminal(t, svc, jobID)
-	if job.Status != ConnectivityJobFinished || job.DoneChecks != 4 || job.RetryChecks != 1 || job.RetryDone != 1 || job.Recovered != 1 {
+	if job.Status != ConnectivityJobFinished || job.DoneChecks != 3 || job.RetryChecks != 1 || job.RetryDone != 1 || job.Recovered != 1 {
 		t.Fatalf("job = %#v", job)
 	}
 	if first, second := <-attempts, <-attempts; first != 1 || second != 2 {

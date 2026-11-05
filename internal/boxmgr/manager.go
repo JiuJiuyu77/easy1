@@ -296,8 +296,30 @@ func (m *Manager) reloadLocked(newCfg *config.Config) error {
 		return errors.New("box manager closed")
 	}
 	if m.currentBox == nil {
+		// The runtime is not running: either it never started (fresh install) or
+		// its first start failed (e.g. the entry port was busy). Adopt the new
+		// config and try to boot it, instead of failing the caller with
+		// "manager not started" - that made every later save/apply impossible
+		// until the container was restarted.
 		m.mu.Unlock()
-		return errors.New("manager not started")
+		m.lifecycleMu.Lock()
+		defer m.lifecycleMu.Unlock()
+		m.mu.Lock()
+		if m.closed {
+			m.mu.Unlock()
+			return errors.New("box manager closed")
+		}
+		if m.currentBox != nil {
+			m.mu.Unlock()
+			return nil
+		}
+		m.adoptConfigLocked(newCfg)
+		m.mu.Unlock()
+		if err := m.startLocked(context.Background(), false); err != nil {
+			m.ReportStartFailure(err)
+			return fmt.Errorf("start runtime: %w", err)
+		}
+		return nil
 	}
 	ctx := m.baseCtx
 	if ctx != nil && ctx.Err() != nil {
