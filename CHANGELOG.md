@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **端口冲突不再导致容器无限重启**：入口端口被占用导致核心启动失败时，进程不再退出，保留管理界面并每 30 秒自动重试，端口释放后自动恢复（此前配合 `restart: unless-stopped` 会形成无限重启）。
+- **管理端口被占用时自动换端口**（+1…+20），并在日志中写出实际绑定地址。
+- **启动失败原因可见**：`/api/diagnostics` 的 `runtime.start_failure` 与仪表盘横幅展示原因与处理建议。
+
 ### Changed
 - 前置代理的"测试连接"改为**经该链访问 GitHub**（`https://github.com/`，要求 2xx 且页面含 github 标记），与节点导入里的站点检测口径一致；此前用 generate_204 只能证明通了一个 204，无法说明链能承载真实流量。
 
