@@ -30,6 +30,7 @@ import (
 	"easy_proxies/internal/geoip"
 	"easy_proxies/internal/importer"
 	"easy_proxies/internal/routing"
+	"easy_proxies/internal/version"
 )
 
 //go:embed assets
@@ -441,8 +442,33 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	// The shell must never be cached: a stale index.html keeps loading stale JS
+	// after an upgrade, which shows up as old and new UI side by side.
+	build := version.Short()
+	page := injectBuild(data, build)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(data)
+	w.Header().Set("Cache-Control", "no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	_, _ = w.Write(page)
+}
+
+// injectBuild stamps the shell with the build id and versioned asset URLs so an
+// upgraded container can never serve a mix of old and new assets.
+func injectBuild(data []byte, build string) []byte {
+	html := string(data)
+	if build == "" {
+		return data
+	}
+	for _, suffix := range []string{".js", ".css"} {
+		html = strings.ReplaceAll(html, suffix+"\"", suffix+"?v="+build+"\"")
+	}
+	marker := "<head>"
+	if idx := strings.Index(html, marker); idx >= 0 {
+		insert := `<script>window.__BUILD__="` + build + `";</script>`
+		pos := idx + len(marker)
+		html = html[:pos] + insert + html[pos:]
+	}
+	return []byte(html)
 }
 
 func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {

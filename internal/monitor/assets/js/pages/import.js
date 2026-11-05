@@ -4,9 +4,7 @@ function renderImport(){
   const dashboard=S.summary||{};
   const running=summary?.status==='running';
   const importCanceling=running && String(summary?.detail||'').includes('正在终止');
-  qs('#view').innerHTML=`<div class="card"><div class="card-head"><div><h2>探测配置</h2><p class="muted">测速（手动/批量/验收）与自动检测共用同一份配置</p></div></div>
-    <div class="card-body">${probeConfigSummaryHTML()}</div></div>
-  <div class="import-layout">
+  qs('#view').innerHTML=`<div class="import-layout">
     <div class="card"><div class="card-head"><h2>导入节点</h2><div class="segmented" role="tablist" aria-label="导入格式">${IMPORT_KINDS.map(([kind,label])=>`<button type="button" role="tab" aria-selected="${S.importKind===kind}" class="${S.importKind===kind?'active':''}" onclick="chooseImportKind('${kind}')" title="${esc(importKindLabel(kind))}">${label}</button>`).join('')}</div></div>
       <div class="card-body import-form">
         <div class="import-meta">
@@ -17,6 +15,7 @@ function renderImport(){
           </div>
         </div>
         ${importFields()}
+        ${probeConfigSummaryHTML(running)}
         ${verificationPolicyHTML('import',S.importTest204,S.importSiteTargets,running)}
         <div class="import-footer">
           <div class="progress"><div id="jobBar"></div></div>

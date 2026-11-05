@@ -322,7 +322,7 @@ async function updateShellStatus(force=false){
 }
 function formatHeap(bytes){const n=Number(bytes)||0;return n>=1<<30?`${(n/(1<<30)).toFixed(2)} GB`:`${(n/(1<<20)).toFixed(1)} MB`}
 function buildBadge(){
-  const build=S.diagnostics?.build||'';
+  const build=window.__BUILD__||S.diagnostics?.build||'';
   if(!build)return '';
   return `<div class="side-build" title="当前镜像构建版本">v${esc(build)}</div>`;
 }

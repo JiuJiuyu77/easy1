@@ -315,3 +315,12 @@ pre.log-view{height:100%;max-height:none;background:#0f172a;color:#cbd5e1;border
 @media(max-width:760px){.sub-source-row{grid-template-columns:1fr}}
 
 .sni-result .table-row{min-width:0}
+
+/* 探测配置入口（导入/订阅刷新/基础运行/批量 共用） */
+.probe-card{display:flex;align-items:center;gap:12px;justify-content:space-between;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface-subtle)}
+.probe-card-main{display:grid;gap:4px;min-width:0}
+.probe-card-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.probe-card-title strong{font-size:13.5px}
+.probe-card-list{margin:0;font-size:12.5px;word-break:break-all}
+.probe-card .btn{flex:0 0 auto}
+@media(max-width:640px){.probe-card{flex-wrap:wrap}.probe-card .btn{width:100%}}

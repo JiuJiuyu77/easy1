@@ -14,10 +14,9 @@ async function loadConnectivityScopes(request){
 function connectivityTargetName(id){return {google:'Google',github:'GitHub',outlook:'Outlook',proxyspace:'ProxySpace'}[id]||id}
 function verificationPolicyHTML(scope,test204,targets,disabled=false){
   const selected=targets instanceof Set?targets:new Set(targets||[]);
-  const count=selected.size+(test204?1:0);
-  const probeButton=`<button type="button" class="site-selector ${test204?'selected':''}" aria-pressed="${test204?'true':'false'}" ${disabled?'disabled':''} onclick="setVerification204('${scope}',${test204?'false':'true'})"><strong>探测目标</strong><span>${test204?'必须成功':'不检测'}</span></button>`;
+  const count=selected.size;
   const siteButtons=verificationTargets().map(target=>`<button type="button" class="site-selector ${selected.has(target.id)?'selected':''}" aria-pressed="${selected.has(target.id)?'true':'false'}" ${disabled?'disabled':''} onclick="toggleVerificationTarget('${scope}','${target.id}')"><strong>${target.name}</strong><span>${selected.has(target.id)?'必须成功':'不检测'}</span></button>`).join('');
-  return `<div class="verification-policy"><div class="verification-policy-head"><div><strong>节点可用条件</strong><span>探测目标取自设置（${(S.settings?.management?.probe_targets||[]).length||1} 个，${S.settings?.management?.probe_policy==='all'?'全部通过':'任一通过'}）· 站点为附加条件</span></div><span class="pill ${count?'green':'red'}">${count?`已选择 ${count} 项`:'未选择'}</span></div><div class="verification-targets">${probeButton}${siteButtons}</div><p class="muted">站点验收对限速/劫持线路容易误判，建议以探测目标为主；目标与判定方式在顶栏「探测配置」里修改。</p></div>`;
+  return `<div class="verification-policy"><div class="verification-policy-head"><div><strong>站点验收（可选）</strong><span>在上面探测目标通过后，再要求所选站点可达</span></div><span class="pill ${count?'green':'red'}">${count?`已选择 ${count} 项`:'未选择'}</span></div><div class="verification-targets">${siteButtons}</div><p class="muted">站点验收对限速/劫持线路容易误判，按需勾选即可。</p></div>`;
 }
 function verificationPolicy(scope){
   if(scope==='import')return {test_204:!!S.importTest204,site_targets:[...S.importSiteTargets]};
@@ -339,18 +338,18 @@ function probeTargetsEditorHTML(scope){
     </div></div>`;
 }
 
-// 统一摘要：各页面只展示当前配置并提供「编辑」按钮，编辑器只有顶栏弹窗一处。
-function probeConfigSummaryHTML(){
+// 探测配置入口：导入节点 / 订阅刷新 / 基础运行三处共用同一个组件，
+// 保持样式与位置一致；编辑器仍然只有顶栏「探测配置」弹窗一处。
+function probeConfigSummaryHTML(disabled=false){
   const mgmt=(S.settings&&S.settings.management)||{};
   const targets=(Array.isArray(mgmt.probe_targets)&&mgmt.probe_targets.length)?mgmt.probe_targets:['https://www.gstatic.com/generate_204'];
   const policy=mgmt.probe_policy==='all'?'全部通过才算可用':'任一通过即算可用';
-  return `<div class="probe-summary">
-    <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
-      <span class="pill green">${targets.length} 个探测目标</span>
-      <span class="pill">${policy}</span>
-      <button class="btn small secondary" type="button" onclick="openProbeConfig()">编辑探测配置</button>
+  return `<div class="probe-card">
+    <div class="probe-card-main">
+      <div class="probe-card-title"><strong>探测目标</strong><span class="pill green">${targets.length} 个</span><span class="pill">${policy}</span></div>
+      <p class="muted probe-card-list">${esc(targets.join(' · '))}</p>
     </div>
-    <p class="muted">${esc(targets.join(' · '))}</p>
+    <button class="btn small secondary" type="button" ${disabled?'disabled':''} onclick="openProbeConfig()">编辑</button>
   </div>`;
 }
 

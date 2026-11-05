@@ -317,6 +317,7 @@ function renderSettings(){
         <div class="settings-section-body">
           <div id="refreshStatusHost">${refreshStatusHTML(S.refreshJob)}</div>
           <label class="toggle-row"><input id="subEnabled" type="checkbox" ${sub.enabled!==false?'checked':''} style="width:auto"><div><strong>启用自动刷新</strong></div></label>
+          ${probeConfigSummaryHTML(refreshing)}
           ${verificationPolicyHTML('refresh',sub.test_204!==false,new Set(sub.site_targets||[]),refreshing)}
           <div class="time-grid">
             <div class="field"><label>天</label><input id="subDays" type="number" min="0" value="${interval.days}"></div>
@@ -325,7 +326,7 @@ function renderSettings(){
           </div>
           <button class="btn secondary block" onclick="saveAutoRefresh()">保存自动刷新设置</button>
           ${subSourceEditorHTML()}
-          <p class="muted">刷新时沿用「基础运行」的探测配置：${probeTargets.length} 个目标 · ${probePolicy==='all'?'全部通过才算可用':'任一通过即算可用'}。需要修改请到基础运行区或顶栏「探测配置」。</p>
+          <p class="muted">刷新沿用基础运行的同一份探测配置；连续失败会按 2^n 退避（上限 30 分钟）。</p>
         </div>
       </section>
 
