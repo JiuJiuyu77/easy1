@@ -324,3 +324,5 @@ pre.log-view{height:100%;max-height:none;background:#0f172a;color:#cbd5e1;border
 .probe-card-list{margin:0;font-size:12.5px;word-break:break-all}
 .probe-card .btn{flex:0 0 auto}
 @media(max-width:640px){.probe-card{flex-wrap:wrap}.probe-card .btn{width:100%}}
+
+.site-selector.custom{border-style:dashed}

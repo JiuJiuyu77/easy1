@@ -48,9 +48,11 @@ func TestProbeConnectivityTargetRequiresRealHTMLPage(t *testing.T) {
 	if !passed.Success || passed.Verdict != ConnectivityVerdictUsable || passed.HTTPStatus != http.StatusOK || passed.FinalHost != host || passed.InspectedBytes < 512 || passed.FailureStage != "" || passed.TLSVersion == "" || !passed.FirstSuccess {
 		t.Fatalf("trusted result = %#v", passed)
 	}
-	failed := probeConnectivityTarget(context.Background(), outbound, ManagedNode{ID: "node"}, target, 1, x509.NewCertPool(), connectivityProbeTimeout)
-	if failed.Success || failed.FailureStage != "tls" || failed.Retryable || failed.Error == "" {
-		t.Fatalf("untrusted result = %#v", failed)
+	// An untrusted chain must NOT fail the check any more: airports re-sign TLS,
+	// so verification is skipped and only reachability counts.
+	untrusted := probeConnectivityTarget(context.Background(), outbound, ManagedNode{ID: "node"}, target, 1, x509.NewCertPool(), connectivityProbeTimeout)
+	if !untrusted.Success || untrusted.FailureStage == "tls" {
+		t.Fatalf("untrusted chain should still count as reachable: %#v", untrusted)
 	}
 }
 

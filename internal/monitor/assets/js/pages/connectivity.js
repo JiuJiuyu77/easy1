@@ -16,16 +16,15 @@ function verificationPolicyHTML(scope,test204,targets,disabled=false){
   const selected=targets instanceof Set?targets:new Set(targets||[]);
   const count=selected.size;
   const siteButtons=verificationTargets().map(target=>`<button type="button" class="site-selector ${selected.has(target.id)?'selected':''}" aria-pressed="${selected.has(target.id)?'true':'false'}" ${disabled?'disabled':''} onclick="toggleVerificationTarget('${scope}','${target.id}')"><strong>${target.name}</strong><span>${selected.has(target.id)?'必须成功':'不检测'}</span></button>`).join('');
-  return `<div class="verification-policy"><div class="verification-policy-head"><div><strong>站点验收（可选）</strong><span>在上面探测目标通过后，再要求所选站点可达</span></div><span class="pill ${count?'green':'red'}">${count?`已选择 ${count} 项`:'未选择'}</span></div><div class="verification-targets">${siteButtons}</div><p class="muted">站点验收对限速/劫持线路容易误判，按需勾选即可。</p></div>`;
+  return `<div class="verification-policy"><div class="verification-policy-head"><div><strong>站点验收（可选）</strong><span>在上面探测目标通过后，再要求所选站点可达</span></div><span class="pill ${count?'green':'red'}">${count?`已选择 ${count} 项`:'未选择'}</span></div><div class="verification-targets">${siteButtons}<button type="button" class="site-selector custom" ${disabled?'disabled':''} onclick="openCustomSiteDialog()"><strong>＋ 自定义站点</strong><span>添加</span></button></div><p class="muted">站点验收为可选附加条件：全部不勾选时仅按探测目标判定。</p></div>`;
 }
 function verificationPolicy(scope){
   if(scope==='import')return {test_204:!!S.importTest204,site_targets:[...S.importSiteTargets]};
   return {test_204:S.subConfig?.test_204!==false,site_targets:Array.isArray(S.subConfig?.site_targets)?[...S.subConfig.site_targets]:[]};
 }
 function verificationPolicyValid(policy,showError=true){
-  const valid=!!policy.test_204||(policy.site_targets||[]).length>0;
-  if(!valid&&showError)openDialog('请选择检测方式','<p>204 测速和站点检测不能同时关闭。请至少启用一项后再继续。</p>');
-  return valid;
+  // 站点验收是可选附加条件：全部不选时仅按探测目标判定，不再报错。
+  return true;
 }
 function setVerification204(scope,enabled){
   if(scope==='import'){
@@ -408,4 +407,31 @@ function addCustomSite(){
 function removeCustomSite(id){
   const list=((S.settings?.verification?.custom_sites)||[]).filter(site=>site.id!==id);
   saveCustomSites(list).catch(err=>toast(err.message,'err'));
+}
+
+// 从验收区直接添加自定义站点（不跳转页面）
+function openCustomSiteDialog(){
+  openDialog('添加自定义站点', `<p class="muted">保存后出现在「站点验收」与「站点检测」里；marker 为响应体需包含的关键字，可留空（仅校验 2xx）。</p>
+    <div class="settings-form">
+      <div class="field"><label>名称</label><input id="dlgSiteName" placeholder="例如 我的站点"></div>
+      <div class="field"><label>URL</label><input id="dlgSiteURL" placeholder="https://example.com/"></div>
+      <div class="field"><label>marker（可选）</label><input id="dlgSiteMarker" placeholder="关键字"></div>
+    </div>
+    <div class="settings-actions"><button class="btn secondary" type="button" onclick="qs('#resultModal')?.classList.remove('show')">取消</button><button class="btn primary" type="button" onclick="submitCustomSiteFromDialog()">保存</button></div>`);
+}
+async function submitCustomSiteFromDialog(){
+  const name=(qs('#dlgSiteName')?.value||'').trim();
+  const url=(qs('#dlgSiteURL')?.value||'').trim();
+  const marker=(qs('#dlgSiteMarker')?.value||'').trim();
+  if(!url){toast('请填写站点 URL','err');return}
+  const slug=(name||url).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,24)||('site'+Date.now().toString(36));
+  const list=[...((S.settings?.verification?.custom_sites)||[])];
+  if(list.some(site=>site.id===slug)){toast('该站点已存在','err');return}
+  list.push({id:slug,name:name||slug,url,marker});
+  try{
+    await api('/api/settings',{method:'PUT',body:JSON.stringify({verification:{custom_sites:list}})});
+    qs('#resultModal')?.classList.remove('show');
+    toast('已添加自定义站点');
+    await loadSettings();await refresh();
+  }catch(err){toast(err.message,'err')}
 }

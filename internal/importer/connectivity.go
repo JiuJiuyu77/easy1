@@ -955,7 +955,11 @@ func newConnectivityHTTPClient(outbound adapter.Outbound, roots *x509.CertPool, 
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			return outbound.DialContext(ctx, network, M.ParseSocksaddr(address))
 		},
-		TLSClientConfig:       &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12},
+		// Site verification answers "is this site reachable through the node".
+		// Airports and middleboxes routinely re-sign TLS, so verifying the
+		// target's chain here fails healthy nodes; keep our own roots only for
+		// reference and skip verification, like the probe path does.
+		TLSClientConfig:       &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12, InsecureSkipVerify: true},
 		TLSHandshakeTimeout:   timeout,
 		ResponseHeaderTimeout: timeout,
 		ForceAttemptHTTP2:     true,
