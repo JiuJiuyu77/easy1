@@ -5,6 +5,7 @@ import (
 	"runtime"
 
 	"easy_proxies/internal/importer"
+	"easy_proxies/internal/version"
 )
 
 type diagnosticsProvider interface {
@@ -19,6 +20,7 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 	var memory runtime.MemStats
 	runtime.ReadMemStats(&memory)
 	result := map[string]any{
+		"build": version.Short(),
 		"go": map[string]any{
 			"goroutines":       runtime.NumGoroutine(),
 			"heap_alloc_bytes": memory.HeapAlloc,

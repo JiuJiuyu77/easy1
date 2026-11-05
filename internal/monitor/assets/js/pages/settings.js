@@ -332,6 +332,8 @@ function renderSettings(){
             <div class="field"><label>分钟</label><input id="subMinutes" type="number" min="0" max="59" value="${interval.minutes}"></div>
           </div>
           <button class="btn secondary block" onclick="saveAutoRefresh()">保存自动刷新设置</button>
+          <p class="muted">刷新时会按下面的探测目标重新验证节点；连续失败会按 2^n 退避（上限 30 分钟）。</p>
+          ${probeTargetsEditorHTML('refresh')}
         </div>
       </section>
 

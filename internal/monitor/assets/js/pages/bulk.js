@@ -17,7 +17,9 @@ function renderBulk(){
     pool:Number(summary.in_pool)||0,
     failed:Number(summary.failed)||0,
   };
-  qs('#view').innerHTML=`<div class="grid">
+  qs('#view').innerHTML=`<div class="card"><div class="card-head"><div><h2>探测配置</h2><p class="muted">批量测速按这里的多目标与判定方式执行</p></div></div>
+    <div class="card-body">${probeTargetsEditorHTML('bulk')}</div></div>
+  <div class="grid">
     <div class="card"><div class="card-head"><h2>批量测试</h2></div><div class="card-body stack">
       <div class="bulk-grid"><div class="bulk-group"><strong>测试范围</strong>
         <label class="bulk-option"><input type="checkbox" id="bulkCandidate" ${sel.candidate?'checked':''} onchange="updateBulkSummary()"><span>候选节点</span><span class="value-pill muted">${counts.candidate}</span></label>

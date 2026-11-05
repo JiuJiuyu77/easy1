@@ -2353,6 +2353,17 @@ func (s *Service) rememberSourceSuccess(rawURL, tagPrefix string, ref *NodeSourc
 	s.sourceMetaMu.Unlock()
 }
 
+// sourceMetaFor returns the remembered fetch identity for a source.
+func (s *Service) sourceMetaFor(rawURL, tagPrefix string) (sourceMetaEntry, bool) {
+	s.sourceMetaMu.RLock()
+	defer s.sourceMetaMu.RUnlock()
+	entry, ok := s.sourceMeta[sourceMetaKey(rawURL, tagPrefix)]
+	if !ok || entry == nil {
+		return sourceMetaEntry{}, false
+	}
+	return *entry, true
+}
+
 func (s *Service) rememberSourceFailure(rawURL, tagPrefix string, err error) {
 	key := sourceMetaKey(rawURL, tagPrefix)
 	s.sourceMetaMu.Lock()
@@ -2377,6 +2388,18 @@ func (s *Service) fetchImportSubscription(ctx context.Context, rawURL string, re
 		},
 	}
 	ref := NodeSourceRef{TagPrefix: req.TagPrefix, UserAgent: req.UserAgent, Headers: req.Headers}
+	if ref.UserAgent == "" || len(ref.Headers) == 0 {
+		// Reuse the client identity that worked for this source before (this
+		// process), so refreshes keep working against stricter providers.
+		if meta, ok := s.sourceMetaFor(rawURL, req.TagPrefix); ok {
+			if ref.UserAgent == "" {
+				ref.UserAgent = meta.UserAgent
+			}
+			if len(ref.Headers) == 0 && len(meta.Headers) > 0 {
+				ref.Headers = meta.Headers
+			}
+		}
+	}
 	result, updated, err := s.fetchSubscriptionWithProfiles(ctx, rawURL, ref, options)
 	if err != nil {
 		s.rememberSourceFailure(rawURL, req.TagPrefix, err)

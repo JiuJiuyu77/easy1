@@ -321,6 +321,11 @@ async function updateShellStatus(force=false){
   renderSideStatus();
 }
 function formatHeap(bytes){const n=Number(bytes)||0;return n>=1<<30?`${(n/(1<<30)).toFixed(2)} GB`:`${(n/(1<<20)).toFixed(1)} MB`}
+function buildBadge(){
+  const build=S.diagnostics?.build||'';
+  if(!build)return '';
+  return `<div class="side-build" title="当前镜像构建版本">v${esc(build)}</div>`;
+}
 function renderSideStatus(){
   const host=qs('#sideStatus');if(!host)return;
   const runtime=S.diagnostics?.runtime,goStats=S.diagnostics?.go;
@@ -328,7 +333,8 @@ function renderSideStatus(){
   const running=!!runtime?.running,pool=Number(S.summary?.in_pool)||0;
   host.innerHTML=`<div class="side-stat"><span class="status-dot ${running?'ok':pool?'bad':'warn'}"></span><div><span>代理核心</span><strong>${running?'运行中':'未运行'}</strong></div></div>
     <div class="side-stat">${icon('server','sm')}<div><span>池内端口</span><strong>${esc(pool)}</strong></div></div>
-    ${goStats?`<div class="side-stat">${icon('cpu','sm')}<div><span>堆内存 · 协程</span><strong>${esc(formatHeap(goStats.heap_alloc_bytes))} · ${esc(goStats.goroutines)}</strong></div></div>`:''}`;
+    ${goStats?`<div class="side-stat">${icon('cpu','sm')}<div><span>堆内存 · 协程</span><strong>${esc(formatHeap(goStats.heap_alloc_bytes))} · ${esc(goStats.goroutines)}</strong></div></div>`:''}
+    ${buildBadge()}`;
 }
 function pageFromHash(){
   const page=decodeURIComponent(location.hash.replace(/^#/,''));
