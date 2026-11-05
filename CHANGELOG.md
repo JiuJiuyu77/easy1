@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **手机端适配**：新增 `mobile.css`，导航在窄屏压成一行横向滚动、卡片单列、表格横向滚动、表单与按钮全宽，设置区不再被挤成竖排。
 
 ### Added
+- `scripts/sni_diag.sh`：按「本机直连 SNI 矩阵 → 经面板 CONNECT」两段定位目标域名被 RST 的位置，并在部署文档补充判读与规避思路（本仓库不含任何按域名 reject 的规则，可 grep 复核）。
 - **自定义站点检测**：`verification.custom_sites`（id/name/url/marker），保存后自动进入「节点可用条件」与「站点检测」页，可在站点检测页增删。
 - **订阅源自定义**：`subscription_sources`（每条订阅单独设置客户端 UA / Referer），导入与定时刷新优先使用；仍会保留自动 UA 尝试作为回退。
 - **全局探测配置入口**：顶栏新增「探测配置」按钮，任何页面一点即开（目标 + 任一/全部判定）；设置页基础运行区改为摘要 + 编辑按钮，避免重复控件。

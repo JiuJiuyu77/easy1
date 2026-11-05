@@ -159,7 +159,25 @@ vless://<UUID>@<地址>:443?security=reality&pbk=<公钥>&sid=<短ID>&fp=chrome&
 
 **会话路由**：需要 `pool` 或 `hybrid` 模式 + 共享入口用户名。设置页「会话路由与粘性」可开关、调 TTL（默认 24h）与上限（默认 10000）；「会话路由」页生成 `用户名.sessionID` 的 HTTP/SOCKS5 链接与 curl。停用后按普通用户名调度。
 
-## 11. 升级与回滚
+## 11. 目标域名被 RST 时怎么定位
+
+App 走代理访问某个域名时被 `RST`，先用脚本判断是哪一跳断的：
+
+```bash
+sh scripts/sni_diag.sh <目标域名>            # 本机直连的 SNI 矩阵
+sh scripts/sni_diag.sh <目标域名> 2323       # 再经面板池口（CONNECT 隧道）
+```
+
+- **本机直连就 RST、换个 SNI 就正常** → 链路/运营商按 SNI 阻断，与本面板无关。
+  这类情况只有两条路：换出口线路，或让客户端**不要直连目标 SNI**——即客户端以
+  HTTP 代理的绝对 URL 形式请求（`GET https://目标/路径`），由面板侧发起 TLS。
+  本项目的 mixed 监听（2323）原生支持这种非隧道转发。
+- **本机直连正常、经面板 RST 且耗时极短（<50ms）** → 面板进程本地拒绝，需要排查
+  服务器上的其它组件（反向代理、面板插件、云厂商网络策略）。
+  本仓库自身**不含**按域名 reject 的规则（`Reject`/`geosite`/`rule_set`/
+  `domain_suffix` 全仓无命中），可用 `grep -rn "Reject\|geosite\|rule_set" internal` 复核。
+
+## 12. 升级与回滚
 
 ```bash
 docker compose pull && docker compose up -d --force-recreate
@@ -169,7 +187,7 @@ docker compose pull && docker compose up -d --force-recreate
 - 回滚：`EASY_PROXIES_IMAGE=ghcr.io/jiujiuyu77/easy1:sha-<旧提交> docker compose up -d`。
 - WebUI「设置 → 备份」支持本地 zip 与 WebDAV 目标，可在另一台实例恢复。
 
-## 12. 排障
+## 13. 排障
 
 | 现象 | 原因与处理 |
 | --- | --- |
