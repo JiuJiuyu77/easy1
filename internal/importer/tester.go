@@ -78,6 +78,7 @@ type NodeTester struct {
 	probeTarget          string
 	probeTargets         []string
 	probePolicy          string
+	probeMu              sync.RWMutex
 	ipinfoURL            string
 	timeout              time.Duration
 	concurrency          int
@@ -261,6 +262,84 @@ func (t *NodeTester) Test(ctx context.Context, node ManagedNode) (result TestRes
 		CountryCode: strings.ToUpper(countryCode),
 		CountryName: countryName,
 	}
+}
+
+// currentProbePolicy reports "any" unless "all" was configured.
+func (t *NodeTester) currentProbePolicy() string {
+	t.probeMu.RLock()
+	policy := t.probePolicy
+	t.probeMu.RUnlock()
+	if strings.EqualFold(strings.TrimSpace(policy), "all") {
+		return "all"
+	}
+	return "any"
+}
+
+// probeTargetLabel is what progress events show for the configured targets.
+func probeTargetLabel(targets []string, policy string) string {
+	switch len(targets) {
+	case 0:
+		return ""
+	case 1:
+		return targets[0]
+	default:
+		mode := "任一通过"
+		if strings.EqualFold(policy, "all") {
+			mode = "全部通过"
+		}
+		return fmt.Sprintf("%d 个探测目标（%s）", len(targets), mode)
+	}
+}
+
+// probeNodeTargets runs one node against every configured target and combines
+// the results per policy: "any" succeeds on the first answering target, "all"
+// requires every target to answer.
+func (t *NodeTester) probeNodeTargets(ctx context.Context, node ManagedNode, targets []string, policy string, timeout time.Duration, probe func(context.Context, ManagedNode, string, time.Duration) TestResult) TestResult {
+	if len(targets) == 0 {
+		return TestResult{Error: errors.New("没有配置探测目标")}
+	}
+	requireAll := strings.EqualFold(strings.TrimSpace(policy), "all")
+	var firstErr error
+	var lastOK TestResult
+	worst := int64(0)
+	passed := 0
+	for _, target := range targets {
+		if err := ctx.Err(); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			break
+		}
+		result := probe(ctx, node, target, timeout)
+		if result.Error == nil {
+			passed++
+			lastOK = result
+			if result.LatencyMs > worst {
+				worst = result.LatencyMs
+			}
+			if !requireAll {
+				return result
+			}
+			continue
+		}
+		if firstErr == nil {
+			firstErr = fmt.Errorf("%s: %w", target, result.Error)
+		}
+		if requireAll {
+			return TestResult{Error: firstErr}
+		}
+	}
+	if requireAll && passed == len(targets) {
+		lastOK.LatencyMs = worst
+		return lastOK
+	}
+	if firstErr == nil {
+		firstErr = errors.New("探测失败")
+	}
+	if len(targets) > 1 {
+		return TestResult{Error: fmt.Errorf("%w（%d 个探测目标全部失败）", firstErr, len(targets))}
+	}
+	return TestResult{Error: firstErr}
 }
 
 func (t *NodeTester) Probe(ctx context.Context, node ManagedNode) (result TestResult) {
@@ -691,7 +770,9 @@ func (t *NodeTester) probeBatchWithProgress(ctx context.Context, nodes []Managed
 			}
 		}
 		pending := append([]ManagedNode(nil), nodes...)
-		target := t.probeTarget
+		targets := t.effectiveProbeTargets()
+		policy := t.currentProbePolicy()
+		target := probeTargetLabel(targets, policy)
 		for round := 1; round <= probeRounds && len(pending) > 0; round++ {
 			if round > 1 {
 				select {
@@ -720,7 +801,9 @@ func (t *NodeTester) probeBatchWithProgress(ctx context.Context, nodes []Managed
 				byID[node.ID] = node
 			}
 			for event := range t.runProbeBatchWithConcurrency(ctx, pending, concurrency, timeout, target, priority, func(nodeCtx context.Context, node ManagedNode) TestResult {
-				return probe(nodeCtx, node, target, timeout)
+				// Every node is checked against the configured target list; the
+				// policy decides whether one or all of them must answer.
+				return t.probeNodeTargets(nodeCtx, node, targets, policy, timeout, probe)
 			}) {
 				roundCompleted++
 				if roundCompleted == roundTotal || roundCompleted%progressStep == 0 {
@@ -1011,15 +1094,40 @@ func startProxyBox(ctx context.Context, outboundTag string, outbound option.Outb
 
 func (t *NodeTester) probe(ctx context.Context, client *http.Client) error {
 	targets := t.effectiveProbeTargets()
-	return evaluateProbePolicy(targets, t.probePolicy, func(probeCtx context.Context, target string) error {
+	t.probeMu.RLock()
+	policy := t.probePolicy
+	t.probeMu.RUnlock()
+	return evaluateProbePolicy(targets, policy, func(probeCtx context.Context, target string) error {
 		return t.probeTargetURL(probeCtx, client, target)
 	}, ctx)
 }
 
+// SetProbeTargets swaps the probe list/policy at runtime so a settings change
+// applies to the next test instead of waiting for a restart.
+func (t *NodeTester) SetProbeTargets(targets []string, policy string) {
+	cleaned := make([]string, 0, len(targets))
+	for _, raw := range targets {
+		if value := strings.TrimSpace(raw); value != "" {
+			cleaned = append(cleaned, value)
+		}
+	}
+	t.probeMu.Lock()
+	t.probeTargets = cleaned
+	if strings.TrimSpace(policy) != "" {
+		t.probePolicy = policy
+	}
+	t.probeMu.Unlock()
+}
+
 // effectiveProbeTargets returns the configured list, or the legacy single target.
 func (t *NodeTester) effectiveProbeTargets() []string {
-	if len(t.probeTargets) > 0 {
-		return t.probeTargets
+	t.probeMu.RLock()
+	targets := append([]string(nil), t.probeTargets...)
+	policy := t.probePolicy
+	t.probeMu.RUnlock()
+	_ = policy
+	if len(targets) > 0 {
+		return targets
 	}
 	if strings.TrimSpace(t.probeTarget) != "" {
 		return []string{t.probeTarget}

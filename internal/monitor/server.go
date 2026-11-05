@@ -1474,6 +1474,15 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		s.cfgMu.Unlock()
 
+		// Probe targets/policy are consumed at runtime by the health checker and
+		// by node testing; apply them without waiting for a restart.
+		if s.mgr != nil {
+			s.mgr.SetProbeTargets(candidate.Management.ProbeTargets, candidate.ProbePolicyOrDefault(), candidate.SkipCertVerify)
+		}
+		if svc := s.importService(); svc != nil {
+			svc.SetProbeTargets(candidate.Management.ProbeTargets, candidate.ProbePolicyOrDefault())
+		}
+
 		writeJSON(w, map[string]any{
 			"message":          "设置已保存",
 			"external_ip":      candidate.ExternalIP,

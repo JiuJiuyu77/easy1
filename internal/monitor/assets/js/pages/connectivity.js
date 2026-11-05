@@ -17,7 +17,8 @@ function verificationPolicyHTML(scope,test204,targets,disabled=false){
   const count=selected.size+(test204?1:0);
   const probeButton=`<button type="button" class="site-selector ${test204?'selected':''}" aria-pressed="${test204?'true':'false'}" ${disabled?'disabled':''} onclick="setVerification204('${scope}',${test204?'false':'true'})"><strong>探测目标</strong><span>${test204?'必须成功':'不检测'}</span></button>`;
   const siteButtons=VERIFICATION_TARGETS.map(target=>`<button type="button" class="site-selector ${selected.has(target.id)?'selected':''}" aria-pressed="${selected.has(target.id)?'true':'false'}" ${disabled?'disabled':''} onclick="toggleVerificationTarget('${scope}','${target.id}')"><strong>${target.name}</strong><span>${selected.has(target.id)?'必须成功':'不检测'}</span></button>`).join('');
-  return `<div class="verification-policy"><div class="verification-policy-head"><div><strong>节点可用条件</strong><span>探测目标取自设置（${(S.settings?.management?.probe_targets||[]).length||1} 个，${S.settings?.management?.probe_policy==='all'?'全部通过':'任一通过'}）· 站点为附加条件</span></div><span class="pill ${count?'green':'red'}">${count?`已选择 ${count} 项`:'未选择'}</span></div><div class="verification-targets">${probeButton}${siteButtons}</div><p class="muted">探测已忽略目标证书，但站点验收（GitHub/Google）对被限速或被劫持的机场线路仍容易误判，建议以 204 为主、站点按需勾选。</p></div>`;
+  return `<div class="verification-policy"><div class="verification-policy-head"><div><strong>节点可用条件</strong><span>探测目标取自设置（${(S.settings?.management?.probe_targets||[]).length||1} 个，${S.settings?.management?.probe_policy==='all'?'全部通过':'任一通过'}）· 站点为附加条件</span></div><span class="pill ${count?'green':'red'}">${count?`已选择 ${count} 项`:'未选择'}</span></div><div class="verification-targets">${probeButton}${siteButtons}</div><p class="muted">探测已忽略目标证书，但站点验收（GitHub/Google）对被限速或被劫持的机场线路仍容易误判，建议以探测目标为主、站点按需勾选。</p>
+    ${probeTargetsEditorHTML(scope)}</div>`;
 }
 function verificationPolicy(scope){
   if(scope==='import')return {test_204:!!S.importTest204,site_targets:[...S.importSiteTargets]};
@@ -320,3 +321,31 @@ function toggleConnectivityDetails(){S.connectivityDetailsOpen=!S.connectivityDe
 
 async function setConnectivityResultFilter(name,value){S.connectivityResultFilters[name]=value;S.connectivityResultFilters.page=1;await loadConnectivityResults()}
 async function changeConnectivityResultPage(delta){S.connectivityResultFilters.page=Math.max(1,(S.connectivityResultFilters.page||1)+delta);await loadConnectivityResults()}
+
+// 探测目标与判定方式：测速（手动/批量/导入验收）和自动检测共用这份配置。
+function probeTargetsEditorHTML(scope){
+  const mgmt=S.settings?.management||{};
+  const targets=(Array.isArray(mgmt.probe_targets)&&mgmt.probe_targets.length)?mgmt.probe_targets:['https://www.gstatic.com/generate_204','https://cp.cloudflare.com/generate_204','https://www.github.com/'];
+  const policy=mgmt.probe_policy==='all'?'all':'any';
+  const field='probeTargets_'+scope, policyID='probePolicy_'+scope;
+  return `<div class="probe-editor">
+    <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><strong>探测目标</strong><span class="muted">手动/批量测速与自动检测都使用这里的目标，返回 2xx 即算通过</span></div>
+    <textarea id="${field}" rows="3" placeholder="每行一个，可填任意 http(s) URL 或 host:port">${esc(targets.join('\n'))}</textarea>
+    <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="${policyID}" style="max-width:220px">
+        <option value="any" ${policy==='any'?'selected':''}>任一通过即算可用</option>
+        <option value="all" ${policy==='all'?'selected':''}>全部通过才算可用</option>
+      </select>
+      <button class="btn small secondary" type="button" onclick="saveProbeTargets('${scope}')">保存探测配置</button>
+    </div></div>`;
+}
+async function saveProbeTargets(scope){
+  const targets=(qs('#probeTargets_'+scope)?.value||'').split('\n').map(v=>v.trim()).filter(Boolean);
+  if(!targets.length){toast('至少填写一个探测目标','err');return}
+  const policy=qs('#probePolicy_'+scope)?.value||'any';
+  try{
+    await api('/api/settings',{method:'PUT',body:JSON.stringify({probe_targets:targets,probe_policy:policy})});
+    toast('探测配置已保存，下一次测速立即生效');
+    await refresh();
+  }catch(err){toast(err.message,'err')}
+}

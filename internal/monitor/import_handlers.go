@@ -54,6 +54,7 @@ type ImportService interface {
 	JobEventSnapshot() []importer.JobEvent
 	JobEventStats() importer.JobEventStats
 	ProbeSchedulerStats() importer.ProbeSchedulerStats
+	SetProbeTargets(targets []string, policy string)
 	SetChainProfiles(profiles []proxychain.Profile) error
 	ChainProfiles() []proxychain.Profile
 	TestChainProfile(ctx context.Context, id string) importer.ChainProbeResult

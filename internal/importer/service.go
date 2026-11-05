@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -139,6 +140,16 @@ func (s *Service) ProbeSchedulerStats() ProbeSchedulerStats {
 		return ProbeSchedulerStats{}
 	}
 	return s.tester.ProbeSchedulerStats()
+}
+
+// SetProbeTargets applies a new probe list/policy to node testing immediately.
+func (s *Service) SetProbeTargets(targets []string, policy string) {
+	if s.tester == nil {
+		log.Printf("[probe] tester missing, cannot apply targets %v", targets)
+		return
+	}
+	log.Printf("[probe] applying probe targets=%v policy=%q", targets, policy)
+	s.tester.SetProbeTargets(targets, policy)
 }
 
 func (s *Service) SetChainProfiles(profiles []proxychain.Profile) error {
