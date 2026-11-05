@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **设置页探测配置重复**：基础运行区与订阅刷新区各有一份目标/判定控件，现已收敛为订阅刷新处一份（顶栏「探测配置」弹窗仍可随时打开），并精简了重复的指引文案。
+
 - **端口冲突不再导致容器无限重启**：入口端口被占用导致核心启动失败时，进程不再退出，保留管理界面并每 30 秒自动重试，端口释放后自动恢复（此前配合 `restart: unless-stopped` 会形成无限重启）。
 - **管理端口被占用时自动换端口**（+1…+20），并在日志中写出实际绑定地址。
 - **启动失败原因可见**：`/api/diagnostics` 的 `runtime.start_failure` 与仪表盘横幅展示原因与处理建议。

@@ -190,16 +190,6 @@ function renderSettings(){
         <div class="settings-section-body">
           <div class="settings-form">
             <div class="field"><label>运行模式</label><select id="setMode"><option value="pool">pool</option><option value="multi-port">multi-port</option><option value="hybrid">hybrid</option></select></div>
-            <div class="field wide"><label>探测目标与判定方式</label>
-              <div class="probe-summary">
-                <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
-                  <span class="pill green">${probeTargets.length} 个目标</span>
-                  <span class="pill">${probePolicy==='all'?'全部通过':'任一通过'}</span>
-                  <button class="btn small secondary" type="button" onclick="openProbeConfig()">编辑探测配置</button>
-                </div>
-                <p class="muted">${esc(probeTargets.join(' · '))}</p>
-              </div>
-            </div>
             <div class="field"><label>外部 IP</label><input id="setExternal" value="${esc(s.external_ip||'')}" placeholder="留空则使用当前访问地址"></div>
             <div class="field"><label>管理监听</label><input id="setMgmtListen" value="${esc(management.listen||'')}"></div>
             <div class="field"><label>探测并发</label><input id="setProbeConcurrency" type="number" min="1" max="1024" value="${esc(probeConcurrency)}"></div>
@@ -333,7 +323,6 @@ function renderSettings(){
           </div>
           <button class="btn secondary block" onclick="saveAutoRefresh()">保存自动刷新设置</button>
           ${subSourceEditorHTML()}
-          <p class="muted">刷新时会按下面的探测目标重新验证节点；连续失败会按 2^n 退避（上限 30 分钟）。</p>
           ${probeTargetsEditorHTML('refresh')}
         </div>
       </section>
