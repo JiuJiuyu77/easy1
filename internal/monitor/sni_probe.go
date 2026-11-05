@@ -18,10 +18,10 @@ type sniProbeResult struct {
 	OK bool `json:"ok"`
 	// Unavailable means the hop could not be attempted at all (no listener,
 	// refused, bad CONNECT) — the comparison is then inconclusive.
-	Unavailable bool `json:"unavailable,omitempty"`
-	Millis   int64  `json:"ms"`
-	Error    string `json:"error,omitempty"`
-	PeerAddr string `json:"peer,omitempty"`
+	Unavailable bool   `json:"unavailable,omitempty"`
+	Millis      int64  `json:"ms"`
+	Error       string `json:"error,omitempty"`
+	PeerAddr    string `json:"peer,omitempty"`
 }
 
 // handleSNIProbe answers "is this SNI reset locally, or further out?" by making
