@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **导入/测速仍报 TLS 校验失败**：还剩一处严格校验——走「运行时监听端口」的探测客户端仍用 `skip_cert_verify`。现在与直连探测一致，忽略目标证书（机场重签 TLS 不再误杀节点）。
+- **`no valid nodes available` 无法定位**：全节点构建失败时错误里只有数量。现在会带上前 3 条具体原因（例如 `broken: vless uri missing uuid in userinfo`），日志与接口都能直接看到。
+
 - **`manager not started` 导致检测结果无法应用**：运行时未启动（首次启动失败，如端口被占用）时，`Reload` 直接报错并拒绝，导入/检测结果因此永远应用不上。现在未运行时重载会**就地采用新配置并尝试启动**，失败才返回真实原因。
 - **站点验收误杀大批节点**：移除内置 ProxySpace（走代理时多为非 2xx 或 JS 壳，造成近乎全量失败）；站点验收本身已改为可选，不勾选时只按探测目标判定。
 

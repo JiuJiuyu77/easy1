@@ -404,9 +404,10 @@ func (t *NodeTester) clientForOutboundWithTimeout(ctx context.Context, tag strin
 	}
 	transport := &http.Transport{
 		Proxy: http.ProxyURL(proxyURL),
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: t.skipCertVerify,
-		},
+		// Same rule as newDirectProbeSession: probes judge reachability, not the
+		// target's identity. Airports re-sign TLS, so verifying here turned
+		// healthy nodes into "TLS 校验失败".
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	client := &http.Client{
 		Timeout:   timeout,

@@ -142,6 +142,15 @@ func Build(cfg *config.Config) (option.Options, error) {
 	memberTags := make([]string, 0, len(cfg.Nodes))
 	metadata := make(map[string]poolout.MemberMeta)
 	var failedNodes []string
+	// failedDetails keeps the first few concrete reasons so "all nodes failed to
+	// build" tells the operator what to fix instead of only a count.
+	var failedDetails []string
+	recordFailure := func(name, reason string) {
+		failedNodes = append(failedNodes, name)
+		if len(failedDetails) < 3 {
+			failedDetails = append(failedDetails, name+": "+reason)
+		}
+	}
 	usedTags := make(map[string]int) // Track tag usage for uniqueness
 
 	// 前置代理：为每个被引用的链式 profile 生成一条出站链，最外层作为节点的 detour。
@@ -230,29 +239,29 @@ func Build(cfg *config.Config) (option.Options, error) {
 		outbound, err := buildNodeOutbound(tag, node.URI, cfg.SkipCertVerify)
 		if err != nil {
 			log.Printf("❌ Failed to build node '%s': %v (skipping)", node.Name, err)
-			failedNodes = append(failedNodes, node.Name)
+			recordFailure(node.Name, err.Error())
 			continue
 		}
 		if node.ChainProfileID != "" {
 			detour, ok := chainDetours[node.ChainProfileID]
 			if !ok {
 				log.Printf("❌ Node '%s' references unusable chain profile %q (skipping)", node.Name, node.ChainProfileID)
-				failedNodes = append(failedNodes, node.Name)
+				recordFailure(node.Name, "前置代理不可用: "+node.ChainProfileID)
 				continue
 			}
 			profile, _ := proxychain.Find(cfg.ChainProfiles, node.ChainProfileID)
 			if len(profile.Hops) == 0 {
-				failedNodes = append(failedNodes, node.Name)
+				recordFailure(node.Name, "前置代理没有可用跳板: "+node.ChainProfileID)
 				continue
 			}
 			if err := validateDetourTransport(node.URI, profile.Hops[len(profile.Hops)-1].URI); err != nil {
 				log.Printf("❌ Node '%s': %v (skipping)", node.Name, err)
-				failedNodes = append(failedNodes, node.Name)
+				recordFailure(node.Name, err.Error())
 				continue
 			}
 			if err := SetOutboundDetour(&outbound, detour); err != nil {
 				log.Printf("❌ Node '%s': configure chain detour: %v (skipping)", node.Name, err)
-				failedNodes = append(failedNodes, node.Name)
+				recordFailure(node.Name, "前置代理 detour 配置失败: "+err.Error())
 				continue
 			}
 		}
@@ -352,7 +361,11 @@ func Build(cfg *config.Config) (option.Options, error) {
 
 	// Check if we have at least one valid node
 	if len(baseOutbounds) == 0 {
-		return option.Options{}, fmt.Errorf("no valid nodes available (all %d nodes failed to build)", len(cfg.Nodes))
+		message := fmt.Sprintf("no valid nodes available (all %d nodes failed to build)", len(cfg.Nodes))
+		if len(failedDetails) > 0 {
+			message += ": " + strings.Join(failedDetails, "; ")
+		}
+		return option.Options{}, errors.New(message)
 	}
 
 	// Log summary
