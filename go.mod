@@ -19,7 +19,7 @@ require (
 	github.com/ajg/form v1.5.1
 	github.com/akutz/memconn v0.1.0
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa
-	github.com/andybalholm/brotli v1.2.0
+	github.com/andybalholm/brotli v1.2.8
 	github.com/anytls/sing-anytls v0.0.11
 	github.com/bits-and-blooms/bitset v1.13.0
 	github.com/caddyserver/certmagic v0.25.0
@@ -53,7 +53,7 @@ require (
 	github.com/illarion/gonotify/v2 v2.0.3
 	github.com/insomniacslk/dhcp v0.0.0-20250417080101-5f8cf70e8c5f
 	github.com/jsimonetti/rtnetlink v1.4.0
-	github.com/klauspost/compress v1.18.7
+	github.com/klauspost/compress v1.20.3
 	github.com/klauspost/cpuid/v2 v2.3.0
 	github.com/kortschak/wol v0.0.0-20200729010619-da482cc4850a
 	github.com/libdns/alidns v1.0.5-libdns.v1.beta1
