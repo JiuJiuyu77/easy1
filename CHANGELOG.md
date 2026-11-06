@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 升级受影响的依赖以通过 govulncheck：`github.com/andybalholm/brotli` → v1.2.8（GO-2026-6888）、`github.com/klauspost/compress` → v1.20.3（GO-2026-6865）。
 
 ### Fixed
+- **批量测速致命失败（`bind: cannot assign requested address`）**：每个节点测试都会起一个临时 sing-box 实例并各自监听一个临时端口，大批量时把本地端口耗尽，导致后续节点全部报 `create instance: start sing-box: start inbound/mixed[test-…]`。现在临时实例并发上限 8 个，且对端口耗尽/占用类错误做 4 次退避重试。
+- **运行时监听检查不再误杀节点**：节点尚未分配运行时端口时，跳过该附加检查（直连探测已通过），不再返回 `runtime listener port is not assigned` 判失败。
+
 - **导入/测速仍报 TLS 校验失败**：还剩一处严格校验——走「运行时监听端口」的探测客户端仍用 `skip_cert_verify`。现在与直连探测一致，忽略目标证书（机场重签 TLS 不再误杀节点）。
 - **`no valid nodes available` 无法定位**：全节点构建失败时错误里只有数量。现在会带上前 3 条具体原因（例如 `broken: vless uri missing uuid in userinfo`），日志与接口都能直接看到。
 

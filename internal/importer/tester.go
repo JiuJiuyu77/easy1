@@ -79,6 +79,8 @@ type NodeTester struct {
 	probeTargets         []string
 	probePolicy          string
 	probeMu              sync.RWMutex
+	boxSemOnce           sync.Once
+	boxSem               chan struct{}
 	ipinfoURL            string
 	timeout              time.Duration
 	concurrency          int
@@ -392,8 +394,18 @@ func (t *NodeTester) clientForNodeWithTimeout(ctx context.Context, node ManagedN
 }
 
 func (t *NodeTester) clientForOutboundWithTimeout(ctx context.Context, tag string, outbound option.Outbound, timeout time.Duration) (*http.Client, func(), error) {
-	instance, port, err := startProxyBox(ctx, tag, outbound)
+	// Hold a slot for the lifetime of the instance so a wide batch cannot spawn
+	// dozens of listeners at once.
+	sem := t.testBoxSlot()
+	select {
+	case sem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	}
+	releaseSlot := func() { <-sem }
+	instance, port, err := t.startProxyBoxRetry(ctx, tag, outbound)
 	if err != nil {
+		releaseSlot()
 		return nil, nil, err
 	}
 
@@ -416,6 +428,7 @@ func (t *NodeTester) clientForOutboundWithTimeout(ctx context.Context, tag strin
 	return client, func() {
 		transport.CloseIdleConnections()
 		_ = instance.Close()
+		releaseSlot()
 	}, nil
 }
 
@@ -836,7 +849,10 @@ func (t *NodeTester) probeRuntimeListener(ctx context.Context, node ManagedNode,
 		return result
 	}
 	if node.Port == 0 {
-		return TestResult{Error: fmt.Errorf("runtime listener port is not assigned")}
+		// No runtime port yet (not promoted, or the pool is rebuilding). The
+		// direct probe already answered, so skip the extra check instead of
+		// failing a healthy node.
+		return result
 	}
 
 	proxyURL := &url.URL{
@@ -1055,6 +1071,56 @@ func probeRoundTimeout(base time.Duration, _ int) time.Duration {
 func safeTestResult(fn func() TestResult) (result TestResult) {
 	defer recoverTestResult(&result)
 	return fn()
+}
+
+// testBoxConcurrency caps how many throwaway sing-box instances may exist at
+// once. Every node test starts one, and binding a fresh ephemeral port for each
+// of them exhausts the local port range on big batches ("bind: cannot assign
+// requested address"), which used to fail every remaining node.
+const testBoxConcurrency = 8
+
+func (t *NodeTester) testBoxSlot() chan struct{} {
+	t.boxSemOnce.Do(func() {
+		t.boxSem = make(chan struct{}, testBoxConcurrency)
+	})
+	return t.boxSem
+}
+
+// startProxyBoxRetry tolerates transient listener failures: port exhaustion and
+// address-in-use clear up as sibling instances are closed.
+func (t *NodeTester) startProxyBoxRetry(ctx context.Context, tag string, outbound option.Outbound) (*box.Box, uint16, error) {
+	const attempts = 4
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		instance, port, err := startProxyBox(ctx, tag, outbound)
+		if err == nil {
+			return instance, port, nil
+		}
+		lastErr = err
+		if !isTransientBindError(err) || ctx.Err() != nil {
+			return nil, 0, err
+		}
+		if attempt == attempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, 0, ctx.Err()
+		case <-time.After(time.Duration(attempt) * 150 * time.Millisecond):
+		}
+	}
+	return nil, 0, lastErr
+}
+
+// isTransientBindError reports bind failures that are worth retrying.
+func isTransientBindError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "cannot assign requested address") ||
+		strings.Contains(message, "address already in use") ||
+		strings.Contains(message, "too many open files")
 }
 
 func startProxyBox(ctx context.Context, outboundTag string, outbound option.Outbound) (*box.Box, uint16, error) {
