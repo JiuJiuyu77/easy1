@@ -14,17 +14,24 @@ async function loadConnectivityScopes(request){
 function connectivityTargetName(id){return {google:'Google',github:'GitHub',outlook:'Outlook',proxyspace:'ProxySpace'}[id]||id}
 function verificationPolicyHTML(scope,test204,targets,disabled=false){
   const selected=targets instanceof Set?targets:new Set(targets||[]);
-  const count=selected.size;
-  const siteButtons=verificationTargets().map(target=>`<button type="button" class="site-selector ${selected.has(target.id)?'selected':''}" aria-pressed="${selected.has(target.id)?'true':'false'}" ${disabled?'disabled':''} onclick="toggleVerificationTarget('${scope}','${target.id}')"><strong>${target.name}</strong><span>${selected.has(target.id)?'必须成功':'不检测'}</span></button>`).join('');
-  return `<div class="verification-policy"><div class="verification-policy-head"><div><strong>站点验收（可选）</strong><span>在上面探测目标通过后，再要求所选站点可达</span></div><span class="pill ${count?'green':'red'}">${count?`已选择 ${count} 项`:'未选择'}</span></div><div class="verification-targets">${siteButtons}<button type="button" class="site-selector custom" ${disabled?'disabled':''} onclick="openCustomSiteDialog()"><strong>＋ 自定义站点</strong><span>添加</span></button></div><p class="muted">站点验收为可选附加条件：全部不勾选时仅按探测目标判定。</p></div>`;
+  const count=selected.size+(test204?1:0);
+  const probeButton=`<button type="button" class="site-selector ${test204?'selected':''}" aria-pressed="${test204?'true':'false'}" ${disabled?'disabled':''} onclick="setVerification204('${scope}',${test204?'false':'true'})"><strong>探测目标</strong><span>${test204?'必须成功':'不检测'}</span></button>`;
+  const siteButtons=verificationTargets().map(target=>{
+    const toggle=`<button type="button" class="site-selector ${selected.has(target.id)?'selected':''}" aria-pressed="${selected.has(target.id)?'true':'false'}" ${disabled?'disabled':''} onclick="toggleVerificationTarget('${scope}','${target.id}')"><strong>${target.name}</strong><span>${selected.has(target.id)?'必须成功':'不检测'}</span></button>`;
+    if(!target.custom)return toggle;
+    // 自定义站点额外带删除按钮（内置站点不可删）。
+    return `<span class="site-selector-wrap">${toggle}<button type="button" class="site-selector-del" title="删除自定义站点 ${target.name}" aria-label="删除自定义站点 ${target.name}" ${disabled?'disabled':''} onclick="deleteCustomSite('${target.id}')">×</button></span>`;
+  }).join('');
+  return `<div class="verification-policy"><div class="verification-policy-head"><div><strong>节点可用条件</strong><span>所选项目必须全部成功</span></div><span class="pill ${count?'green':'red'}">${count?`已选择 ${count} 项`:'未选择'}</span></div><div class="verification-targets">${probeButton}${siteButtons}<button type="button" class="site-selector custom" ${disabled?'disabled':''} onclick="openCustomSiteDialog()"><strong>＋ 自定义站点</strong><span>添加</span></button></div><p class="muted">探测目标（多目标，任一/全部）与所选站点都必须成功；全部关闭时无法继续。</p></div>`;
 }
 function verificationPolicy(scope){
   if(scope==='import')return {test_204:!!S.importTest204,site_targets:[...S.importSiteTargets]};
   return {test_204:S.subConfig?.test_204!==false,site_targets:Array.isArray(S.subConfig?.site_targets)?[...S.subConfig.site_targets]:[]};
 }
 function verificationPolicyValid(policy,showError=true){
-  // 站点验收是可选附加条件：全部不选时仅按探测目标判定，不再报错。
-  return true;
+  const valid=!!policy.test_204||(policy.site_targets||[]).length>0;
+  if(!valid&&showError)openDialog('请选择检测方式','<p>探测目标和站点检测不能同时关闭，请至少启用一项后再继续。</p>');
+  return valid;
 }
 function setVerification204(scope,enabled){
   if(scope==='import'){
@@ -385,6 +392,26 @@ function customSitesHTML(){
       </div>
       <div class="settings-actions"><button class="btn secondary" type="button" onclick="addCustomSite()">添加自定义站点</button></div>
     </div></div>`;
+}
+function deleteCustomSite(id){
+  const sites=(S.settings?.verification?.custom_sites)||[];
+  const site=sites.find(item=>item.id===id);
+  if(!site)return;
+  openDialog('删除自定义站点', `<p>确认删除「${esc(site.name||site.id)}」？</p><p class="muted">${esc(site.url)}</p><p class="muted">删除后该站点会从验收与站点检测中移除，已选中的勾选也会一并清除。</p>`,
+    {actions:`<button class="btn" type="button" onclick="closeDialog()">取消</button><button class="btn danger" type="button" onclick="confirmDeleteCustomSite('${esc(site.id)}')">删除</button>`});
+}
+async function confirmDeleteCustomSite(id){
+  const list=((S.settings?.verification?.custom_sites)||[]).filter(site=>site.id!==id);
+  try{
+    await api('/api/settings',{method:'PUT',body:JSON.stringify({verification:{custom_sites:list}})});
+    // 同步清理已选中的站点，避免引用已删除的 id。
+    for(const set of [S.importSiteTargets,S.connectivityTestTargets,S.connectivitySelectedTargets]){
+      if(set&&typeof set.delete==='function')set.delete(id);
+    }
+    closeDialog();
+    toast('已删除自定义站点');
+    await loadSettings();await refresh();
+  }catch(err){toast(err.message,'err')}
 }
 async function saveCustomSites(list){
   await api('/api/settings',{method:'PUT',body:JSON.stringify({verification:{custom_sites:list}})});

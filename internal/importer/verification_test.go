@@ -24,15 +24,10 @@ func TestNormalizeVerificationPolicy(t *testing.T) {
 			t.Fatalf("policy = %+v, err = %v", policy, err)
 		}
 	})
-	t.Run("empty policy allowed", func(t *testing.T) {
-		// Site checks are optional extras; the probe targets are the main gate.
+	t.Run("empty policy rejected", func(t *testing.T) {
 		disabled := false
-		policy, err := NormalizeVerificationPolicy(&disabled, nil)
-		if err != nil {
-			t.Fatalf("empty policy should be valid: %v", err)
-		}
-		if policy.Test204 || len(policy.SiteTargets) != 0 {
-			t.Fatalf("policy = %+v", policy)
+		if _, err := NormalizeVerificationPolicy(&disabled, nil); err == nil {
+			t.Fatal("expected validation error")
 		}
 	})
 	t.Run("unknown target rejected", func(t *testing.T) {

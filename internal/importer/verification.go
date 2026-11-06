@@ -28,8 +28,9 @@ func NormalizeVerificationPolicy(test204 *bool, siteTargets []string) (Verificat
 			policy.SiteTargets = append(policy.SiteTargets, target.ID)
 		}
 	}
-	// Nothing selected is valid: the configured probe targets are the primary
-	// gate now, and site checks are purely optional extras.
+	if !policy.Test204 && len(policy.SiteTargets) == 0 {
+		return VerificationPolicy{}, fmt.Errorf("至少启用探测目标或选择一个站点")
+	}
 	return policy, nil
 }
 

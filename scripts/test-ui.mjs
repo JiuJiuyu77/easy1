@@ -121,3 +121,14 @@ test('proxy-related write failures carry an actionable hint', () => {
   assert.match(jsSource, /status===405/);
   assert.match(jsSource, /status===502/);
 });
+test('verification area keeps custom sites with a delete button', () => {
+  const js = readFileSync(join(root, 'js/pages/connectivity.js'), 'utf8');
+  // 自定义站点保留，并带删除入口
+  assert.match(js, /site-selector-del/);
+  assert.match(js, /function deleteCustomSite\(/);
+  assert.match(js, /function confirmDeleteCustomSite\(/);
+  assert.match(js, /＋ 自定义站点/);
+  // 验收必选（回滚"可选"行为）
+  assert.match(js, /探测目标和站点检测不能同时关闭/);
+  assert.match(js, /test_204\|\|\(policy\.site_targets\|\|\[\]\)\.length>0/);
+});

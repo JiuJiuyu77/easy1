@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **启动失败原因可见**：`/api/diagnostics` 的 `runtime.start_failure` 与仪表盘横幅展示原因与处理建议。
 
 ### Changed
+- **回滚「验收可选」**：恢复为「探测目标 / 站点」必须至少启用一项，全部关闭时无法开始检测。
+- **自定义验收站点保留并支持删除**：验收区里自定义站点按钮旁新增 `×` 删除键（带确认弹窗），删除后同步清除各处已选中的勾选；内置站点不可删。
+
 - **探测配置入口统一**：导入节点 / 订阅刷新 / 基础运行（以及批量工具）各放**同一个**紧凑组件（目标数 + 判定方式 + 目标列表 + 编辑按钮），样式与位置一致；旧的「节点可用条件」里重复的「探测目标」按钮已删除，站点验收只保留 Google/GitHub/Outlook/ProxySpace 等站点项。
 - **静态资源带版本号**：首页不再缓存，`index.html` 注入 `window.__BUILD__` 且 JS/CSS 引用追加 `?v=<sha>`，避免升级后旧 JS 与新 HTML 混用（表现为新旧 UI 同时存在、侧栏无版本号）。
 
