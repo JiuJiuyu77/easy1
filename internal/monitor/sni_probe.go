@@ -53,6 +53,18 @@ func (s *Server) handleSNIProbe(w http.ResponseWriter, r *http.Request) {
 	direct := probeTLSHandshake(ctx, dialAddr, sni)
 	viaPanel := probeTLSViaListener(ctx, s.proxyListenerAddress(), s.proxyListenerAuth(), dialAddr, sni)
 
+	// Resolution is reported because a domestic answer for a China-only host is
+	// the usual reason an overseas exit times out: the panel resolves with its
+	// own resolver, the node then dials an address that only works inside CN.
+	resolved := resolveHostList(ctx, host)
+	perIP := make(map[string]sniProbeResult, len(resolved))
+	for index, ip := range resolved {
+		if index >= 3 {
+			break
+		}
+		perIP[ip] = probeTLSHandshake(ctx, net.JoinHostPort(ip, port), sni)
+	}
+
 	verdict := "未知"
 	switch {
 	case viaPanel.Unavailable:
@@ -72,6 +84,8 @@ func (s *Server) handleSNIProbe(w http.ResponseWriter, r *http.Request) {
 		"sni":       sni,
 		"direct":    direct,
 		"via_panel": viaPanel,
+		"resolved":  resolved,
+		"per_ip":    perIP,
 		"verdict":   verdict,
 	})
 }
@@ -214,4 +228,18 @@ func (s *Server) proxyListenerAuth() string {
 		return ""
 	}
 	return username + ":" + s.cfgSrc.Listener.Password
+}
+
+// resolveHostList returns the addresses this process resolves for a host.
+func resolveHostList(ctx context.Context, host string) []string {
+	if net.ParseIP(host) != nil {
+		return []string{host}
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupHost(lookupCtx, host)
+	if err != nil {
+		return nil
+	}
+	return addrs
 }

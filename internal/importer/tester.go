@@ -79,8 +79,6 @@ type NodeTester struct {
 	probeTargets         []string
 	probePolicy          string
 	probeMu              sync.RWMutex
-	boxSemOnce           sync.Once
-	boxSem               chan struct{}
 	ipinfoURL            string
 	timeout              time.Duration
 	concurrency          int
@@ -394,18 +392,10 @@ func (t *NodeTester) clientForNodeWithTimeout(ctx context.Context, node ManagedN
 }
 
 func (t *NodeTester) clientForOutboundWithTimeout(ctx context.Context, tag string, outbound option.Outbound, timeout time.Duration) (*http.Client, func(), error) {
-	// Hold a slot for the lifetime of the instance so a wide batch cannot spawn
-	// dozens of listeners at once.
-	sem := t.testBoxSlot()
-	select {
-	case sem <- struct{}{}:
-	case <-ctx.Done():
-		return nil, nil, ctx.Err()
-	}
-	releaseSlot := func() { <-sem }
+	// No concurrency cap: the previous limit slowed large batches. Transient
+	// bind failures (port exhaustion) are absorbed by startProxyBoxRetry.
 	instance, port, err := t.startProxyBoxRetry(ctx, tag, outbound)
 	if err != nil {
-		releaseSlot()
 		return nil, nil, err
 	}
 
@@ -428,7 +418,6 @@ func (t *NodeTester) clientForOutboundWithTimeout(ctx context.Context, tag strin
 	return client, func() {
 		transport.CloseIdleConnections()
 		_ = instance.Close()
-		releaseSlot()
 	}, nil
 }
 
@@ -1071,19 +1060,6 @@ func probeRoundTimeout(base time.Duration, _ int) time.Duration {
 func safeTestResult(fn func() TestResult) (result TestResult) {
 	defer recoverTestResult(&result)
 	return fn()
-}
-
-// testBoxConcurrency caps how many throwaway sing-box instances may exist at
-// once. Every node test starts one, and binding a fresh ephemeral port for each
-// of them exhausts the local port range on big batches ("bind: cannot assign
-// requested address"), which used to fail every remaining node.
-const testBoxConcurrency = 8
-
-func (t *NodeTester) testBoxSlot() chan struct{} {
-	t.boxSemOnce.Do(func() {
-		t.boxSem = make(chan struct{}, testBoxConcurrency)
-	})
-	return t.boxSem
 }
 
 // startProxyBoxRetry tolerates transient listener failures: port exhaustion and
